@@ -1196,8 +1196,7 @@ namespace Hook
 				UpdateScene(currData);
 				D3DInstance->GrabScreen();
 
-				if (legacyFlag) D3DInstance->RenderToReticleTexture();
-				else D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
+				D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
 				
 				g_Context->OMSetRenderTargets(1, &tempRt, tempSV);
 
