@@ -76,8 +76,12 @@ using namespace Hook;
 D3D* hookIns;
 ImGuiImpl::ImGuiImplClass* imgui_Impl;
 
+bool isUpdateContext = false;
 
-char* _MESSAGE(const char* fmt, ...);
+float timerA = 0;
+bool bFirstTimeZoomData = false;
+
+BSScrapArray<const BGSKeyword*> lastKeywords = BSScrapArray<const BGSKeyword*>();
 
 
 template <class Ty>
@@ -125,7 +129,6 @@ TESForm* GetFormFromMod(std::string modname, uint32_t formid)
 	}
 	return TESForm::GetFormByID(id);
 }
-
 
 DWORD StartHooking(LPVOID)
 {
@@ -177,35 +180,11 @@ bool IsInADS(Actor* a)
 
 bool IsSideAim()
 {
-	bool temp = false;
-	if (player) 
-	{
-		if (an_45) {
-			temp |= player->HasKeyword(an_45);
-		}
-		if (AnimsXM2010_scopeKH45) {
-			temp |= player->HasKeyword(AnimsXM2010_scopeKH45);
-		}
-		if (AnimsXM2010_scopeKM) {
-			temp |= player->HasKeyword(AnimsXM2010_scopeKM);
-		} 
-		if (AnimsAX50_scopeKH45) {
-			temp |= player->HasKeyword(AnimsAX50_scopeKH45);
-		} 
-		if (Tull_SideAimKeyword) {
-			temp |= player->HasKeyword(Tull_SideAimKeyword);
-		} 
-		if (AX50_toounScope_K) {
-			temp |= player->HasKeyword(AX50_toounScope_K);
-		}
-		if (AX50_toounScope_L) {
-			temp |= player->HasKeyword(AX50_toounScope_L);
-		}
-		if (AnimsAX50_scopeK) {
-			temp |= player->HasKeyword(AnimsAX50_scopeK);
-		}
-	}
-	return temp;
+	static const BGSKeyword* sideAimKeywords[] = { an_45, AnimsXM2010_scopeKH45, AnimsXM2010_scopeKM,
+		AnimsAX50_scopeKH45, Tull_SideAimKeyword,
+		AX50_toounScope_K, AX50_toounScope_L, 
+		AnimsAX50_scopeK };
+	  return player && std::any_of(std::begin(sideAimKeywords), std::end(sideAimKeywords), [](const BGSKeyword* kw) { return kw && player->HasKeyword(kw); });
 }
 
 BGSKeyword* IsMagnifier()
@@ -214,7 +193,7 @@ BGSKeyword* IsMagnifier()
 	if (player) {
 		if (QMW_AnimsQBZ191M_on) {
 			if (player->HasKeyword(QMW_AnimsQBZ191M_on)) {
-				_MESSAGE("QMW_AnimsQBZ191M_on");
+				logger::warn("QMW_AnimsQBZ191M_on");
 				return QMW_AnimsQBZ191M_on;
 			}
 		} else if (QMW_AnimsQBZ191M_off) {
@@ -304,7 +283,7 @@ inline void InitCurrentScopeData()
 					if (player->HasKeyword(tempKeyword))
 					{
 						sdh->SetCurrentFTSData(ftsData);
-						_MESSAGE("HasKeyword");
+						logger::warn("HasKeyword");
 					}
 					else
 						sdh->SetCurrentFTSData(nullptr);
@@ -435,6 +414,15 @@ bool IsNeedToBeCull(int indexCount = 0, int StrideCount = 0)
 	return true;
 }
 
+
+void SetNodeVisibility(NiNode* normal, NiNode* aiming, bool isScopeActive)
+{
+	if (normal && aiming) {
+		normal->SetAppCulled(!isScopeActive);
+		aiming->SetAppCulled(isScopeActive);
+	}
+}
+
 void HandleScopeNode()
 {
 	if (!currentData || currentData->UsingSTS)
@@ -445,12 +433,9 @@ void HandleScopeNode()
 			scopeNormalNode3rd_i = (RE::NiNode*)RE::PlayerCharacter::GetSingleton()->Get3D(false)->GetObjectByName("ScopeNormal");
 			scopeAimingNode3rd_i = (RE::NiNode*)RE::PlayerCharacter::GetSingleton()->Get3D(false)->GetObjectByName("ScopeAiming");
 
-			if (scopeNormalNode3rd_i && scopeAimingNode3rd_i) {
-				if (RE::PlayerCharacter::GetSingleton()->IsInThirdPerson()) {
-					scopeNormalNode3rd_i->SetAppCulled(false);
-					scopeAimingNode3rd_i->SetAppCulled(true);
-					return;
-				}
+			if (RE::PlayerCharacter::GetSingleton()->IsInThirdPerson()) {
+				SetNodeVisibility(scopeNormalNode3rd_i, scopeAimingNode3rd_i, true);
+				return;
 			}
 		}
 
@@ -458,31 +443,19 @@ void HandleScopeNode()
 			scopeNormalNode_i = (RE::NiNode*)RE::PlayerCharacter::GetSingleton()->firstPerson3D->GetObjectByName("ScopeNormal");
 			scopeAimingNode_i = (RE::NiNode*)RE::PlayerCharacter::GetSingleton()->firstPerson3D->GetObjectByName("ScopeAiming");
 
-			if (scopeNormalNode_i && scopeAimingNode_i) {
-				if (bEnableScope) {
-					if (IsNeedToBeCull()) {
-						scopeNormalNode_i->SetAppCulled(true);
-						scopeAimingNode_i->SetAppCulled(false);
-
-					} else {
-						scopeNormalNode_i->SetAppCulled(false);
-						scopeAimingNode_i->SetAppCulled(true);
-					}
-				} else {
-					scopeNormalNode_i->SetAppCulled(false);
-					scopeAimingNode_i->SetAppCulled(true);
-				}
-			}
+			if (bEnableScope) {
+				if (IsNeedToBeCull())
+					SetNodeVisibility(scopeNormalNode_i, scopeAimingNode_i, false);
+				else 
+					SetNodeVisibility(scopeNormalNode_i, scopeAimingNode_i, true);
+			} 
+			else 
+				SetNodeVisibility(scopeNormalNode_i, scopeAimingNode_i, false);
 		}
 	}
 }
 
-bool isUpdateContext = false;
 
-float timerA = 0;
-bool bFirstTimeZoomData = false;
-
-BSScrapArray<const BGSKeyword*> lastKeywords = BSScrapArray<const BGSKeyword*>();
 
 void HookedUpdate()
 {
@@ -615,9 +588,6 @@ void HookedUpdate()
 
 
 
-/// <summary>
-/// The hook method is from Bingle
-/// </summary>
 class EquipWatcher : public BSTEventSink<TESEquipEvent>
 {
 public:
@@ -651,9 +621,6 @@ public:
 	F4_HEAP_REDEFINE_NEW(EquipWatcher);
 };
 
-/// <summary>
-/// The hook method is from Bingle
-/// </summary>
 using std::unordered_map;
 class AnimationGraphEventWatcher
 {
@@ -758,8 +725,9 @@ unordered_map<uint64_t, AnimationGraphEventWatcher::FnProcessEvent> AnimationGra
 bool RegisterFuncs(BSScript::IVirtualMachine* vm)
 {
 	stl::zstring fileName = "FakeThroughScope";
-	//vm->BindNativeMethod(fileName, "TestButton", TestButton);
-
+#ifdef _DEBUG
+	vm->BindNativeMethod(fileName, "TestButton", TestButton);
+#endif  // _DEBUG
 	vm->BindNativeMethod(fileName, "OnChangeAnimFlavor", IssueChangeAnim);
 
 
@@ -768,7 +736,7 @@ bool RegisterFuncs(BSScript::IVirtualMachine* vm)
 
 DWORD WINAPI MainThread(HMODULE hModule)
 {
-	_MESSAGE("MainThread");
+	logger::warn("MainThread");
 	
 
 	while (!BSGraphics::RendererData::GetSingleton() 
@@ -779,8 +747,6 @@ DWORD WINAPI MainThread(HMODULE hModule)
 		|| !RE::BSGraphics::RendererData::GetSingleton()->context) {
 		Sleep(10);
 	}
-
-
 
 	hookIns = Hook::D3D::GetSington();
 	hookIns->ImplHookDX11_Init(hModule, BSGraphics::RendererData::GetSingleton()->renderWindow->hwnd);
@@ -796,12 +762,6 @@ void TestingThread()
 {
 	
 	while (true) {
-		auto bstimer = UI::GetSingleton()->uiTimer;
-		auto gameVm  = GameVM::GetSingleton()->profiler.timer;
-		if (&bstimer && GameVM::GetSingleton() && &gameVm)
-		{
-			Sleep(100);
-		}
 	}
 }
 
@@ -812,10 +772,6 @@ void InitializePlugin()
 	HANDLE hThread1 = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)TestingThread, (HMODULE)REX::W32::GetCurrentModule(), 0, NULL);
 #endif
 	uiTimer = &UI::GetSingleton()->uiTimer;
-
-	logger::warn("ptr_PCUpdateMainThread.address: {}", ptr_PCUpdateMainThread.address());
-	logger::warn("ptr_PCUpdateMainThread.offset: {}", ptr_PCUpdateMainThread.offset());
-	logger::warn("threadID: {}", RE::Main::GetSingleton()->threadID);
 
 	hookIns->EnableRender(true);
 
@@ -925,15 +881,6 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface* a_f4se, F4
 	}
 
 	logger::info("FakeThroughScope Loaded!");
-
-	//CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)StartHooking, NULL, NULL, NULL);
-	/*hookIns = Hook::D3D::GetSington();
-	imgui_Impl = new ImGuiImpl::ImGuiImplClass();
-
-	hookIns->SetImGuiImplClass(imgui_Impl);
-
-	Hook::D3D::Register();*/
-
 	
 	F4SE::AllocTrampoline(8 * 8);
 	
@@ -945,9 +892,9 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface* a_f4se, F4
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 {
 #ifdef _DEBUG
-	//while (!IsDebuggerPresent()) {
-	//}
-	//Sleep(1000);
+	while (!IsDebuggerPresent()) {
+	}
+	Sleep(1000);
 #endif
 
 	F4SE::Init(a_f4se);
@@ -964,15 +911,6 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 	const F4SE::MessagingInterface* message = F4SE::GetMessagingInterface();
 	message->RegisterListener([](F4SE::MessagingInterface::Message* msg) -> void {
 		if (msg->type == F4SE::MessagingInterface::kPostLoad) {
-			//if (MH_CreateHookApiEx(L"dxgi.dll", "D3D11CreateDeviceAndSwapChain", Hooked_D3D11CreateDeviceAndSwapChain, (LPVOID*)&fpOriginalD3D11CreateDeviceAndSwapChain, NULL) != MH_OK) {
-			//	_MESSAGE("Failed to hook D3D11CreateDeviceAndSwapChain");
-			//}
-
-			//if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
-			//	// 处理错误
-			//	_MESSAGE("Failed to enable hooks");
-			//}
-
 		} else if (msg->type == F4SE::MessagingInterface::kGameDataReady) {
 			InitializePlugin();
 
@@ -990,6 +928,8 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 	return true;
 }
 
+
+
 F4SE_EXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 	F4SE::PluginVersionData data{};
 
@@ -1005,10 +945,3 @@ F4SE_EXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 	data.CompatibleVersions({ F4SE::RUNTIME_1_10_163 });
 	return data;
 }();
-
-
-//
-//extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f4se)
-//{
-//
-//}

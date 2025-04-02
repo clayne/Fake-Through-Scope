@@ -10,10 +10,9 @@
 #include <d3dcommon.h>
 #include <MinHook.h>
 #include <REX/W32/COMPTR.hpp>
-#include <MathUtils.h>
-#include <optional>
 
-#include <renderdoc_app.h>
+#include <MathUtils.h>
+#include "hookingStruct.h"
 
 #pragma comment(lib, "D3DCompiler.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -21,31 +20,6 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "shlwapi.lib")
 
-// RenderDoc API接口指针
-RENDERDOC_API_1_6_0* rdoc_api = nullptr;
-
-// 原始Present函数指针
-typedef HRESULT(WINAPI* Present_t)(IDXGISwapChain*, UINT, UINT);
-Present_t OriginalPresent = nullptr;
-
-// 加载RenderDoc API
-bool LoadRenderDoc()
-{
-	// 尝试加载 DLL（如果尚未加载）
-	HMODULE mod = GetModuleHandleA("renderdoc.dll");
-	if (!mod) {
-		// 如果未加载，尝试主动加载（可能需要管理员权限）
-		mod = LoadLibraryA("renderdoc.dll");
-		if (!mod) return false;
-
-		pRENDERDOC_GetAPI RENDERDOC_GetAPI =
-			(pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
-
-		int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_6_0, (void**)&rdoc_api);
-		return ret == 1;
-	}
-	return false;
-}
 
 bool EnableDebugPrivilege()
 {
@@ -76,9 +50,8 @@ bool EnableDebugPrivilege()
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-static constexpr UINT TARGET_STRIDE = 28;
-static constexpr UINT TARGET_INDEX_COUNT = 66;
-//static constexpr UINT TARGET_INDEX_COUNT = 24;
+static constexpr UINT TARGET_STRIDE = 20;
+static constexpr UINT TARGET_INDEX_COUNT = 24;
 static constexpr UINT TARGET_BUFFER_SIZE = 0x0000000008000000;
 static constexpr UINT TARGET_TEXTURE_WIDTH = 2048;
 static constexpr UINT TARGET_TEXTURE_HEIGHT = 2048;
@@ -90,14 +63,6 @@ ComPtr<ID3D11Device> g_Device = nullptr;
 ComPtr<ID3D11DeviceContext> g_Context = nullptr;
 
 ImGuiIO io;
-
-static const char* current_item = NULL;
-static const char* current_itemA = NULL;
-
-int appculltestCount = 0;
-
-bool isInitNVGComboKey = false;
-bool isInitNVGMainKey = false;
 
 bool bChangeAimTexture = true;
 bool bResetZoomDelta = false;
@@ -114,7 +79,6 @@ using namespace DirectX;
 
 static HWND g_hWnd;
 static HMODULE g_hModule;
-static std::once_flag g_isInitialized;
 
 DWORD_PTR* pSwapChainVTable = nullptr;
 DWORD_PTR* pDeviceVTable = nullptr;
@@ -122,10 +86,6 @@ DWORD_PTR* pDeviceContextVTable = nullptr;
 
 int windowWidth;
 int windowHeight;
-
-XMVECTORF32 bgColor = { 0.1f, 0.1f, 0.1f, 0.0f };
-const float NEAR_PLANE = 0.1f;    // Near clipping plane distance
-const float FAR_PLANE = 1000.0f;  // Far clipping plane distance
 
 float gameZoomDelta = 1;
 bool bIsFirst = true;
@@ -138,6 +98,10 @@ ID3D11Buffer* targetVertexConstBuffer1;
 ID3D11Buffer* targetVertexConstBufferOutPut;
 ID3D11Buffer* targetVertexConstBufferOutPut1p5;
 ID3D11Buffer* targetVertexConstBufferOutPut1;
+
+Microsoft::WRL::ComPtr<ID3D11Buffer> targetIndexBuffer;
+DXGI_FORMAT targetIndexBufferFormat;
+UINT targetIndexBufferOffset;
 
 // Boolean
 BOOL g_bInitialised = false;
@@ -152,8 +116,6 @@ bool InitWndHandler = false;
 ID3D11RenderTargetView* tempRt;
 ID3D11DepthStencilView* tempSV;
 
-bool bHasGrab = false;
-
 UINT targetIndexCount = 0;
 UINT targetStartIndexLocation = 0;
 UINT targetBaseVertexLocation = 0;
@@ -165,9 +127,7 @@ ComPtr<ID3D11PixelShader> targetPS;
 ComPtr<ID3D11DepthStencilState> targetDepthStencilState = nullptr;
 ComPtr<ID3D11InputLayout> targetInputLayout;
 
-ID3D11Buffer* targetIndexBuffer;
-DXGI_FORMAT targetIndexBufferFormat;
-UINT targetIndexBufferOffset;
+
 
 ComPtr<ID3D11Buffer> targetVertexBuffer;
 UINT targetVertexBufferStrides;
@@ -175,115 +135,25 @@ UINT targetVertexBufferOffsets;
 
 ComPtr<ID3D11ShaderResourceView> DrawIndexedSRV;
 
-ComPtr<ID3D11BlendState> overrideBlendState;
-
-
-bool bHasDraw = false;
 bool bHasGetBackBuffer = false;
 Hook::D3D* D3DInstance = Hook::D3D::GetSington();
 
-struct RTVertex
-{
-	XMFLOAT3 position;  // 位置
-	XMFLOAT2 texcoord;  // 纹理坐标
-};
-
-struct Vertex
-{
-	float x, y, z;  // 位置
-	float r, g, b;  // 颜色
-};
-
-struct BufferInfo
-{
-	UINT stride;
-	UINT offset;
-	D3D11_BUFFER_DESC desc;
-};
-
-
-struct HookInfo
-{
-	UINT index;
-	void* hook;
-	void** original;
-	const char* name;  // 用于日志
-};
-	
-
-// 顶点数据
-Vertex gdc_Vertices[] = {
-	{ -1.0f, -1.0f, 0.0f, 0.0f, 0.0f},  // 左下角
-	{ -1.0f, 3.0f, 0.0f, 0.0f, 2.0f},   // 左上角
-	{ 3.0f, -1.0f, 0.0f, 2.0f, 0.0f}    // 右下角
-};
-
-unsigned int gdc_Indices[] = {
-	0, 1, 2  // 第一个三角形
-};
-
-unsigned int plane_Indices[] = {
-	0, 1, 2,
-	2, 3, 0,
-	1,4,5,
-	5,2,1,
-	3,2,6,
-	6,7,3,
-	2,5,8,
-	8,6,2
-};
-
 ComPtr<ID3D11Buffer> plane_pIndexBuffer = nullptr;
-ID3D11Buffer* defaultBuffer = nullptr;
-ID3D11Buffer* copyBuffer = nullptr;
-
 
 ID3D11Buffer* gdc_pVertexBuffer = NULL;
 ID3D11InputLayout* gdc_pVertexLayout = NULL;
 ID3D11Buffer* gdc_pIndexBuffer = NULL;
-D3D11_INPUT_ELEMENT_DESC gdc_layout[] = {
-	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },  // 位置元素描述
-	{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },    // 颜色元素描述
-};
-
-D3D11_INPUT_ELEMENT_DESC inputElements[] = {
-	{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(RTVertex, position), D3D11_INPUT_PER_VERTEX_DATA, 0 },
-	{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(RTVertex, texcoord), D3D11_INPUT_PER_VERTEX_DATA, 0 }
-};
 
 using namespace ScopeData;
-
-
-char tempbuf[8192] = { 0 };
-char* _MESSAGE(const char* fmt, ...)
-{
-	va_list args;
-	va_start(args, fmt);
-	size_t count = sizeof(tempbuf) - 1;
-	int len = vsnprintf(tempbuf, sizeof(tempbuf), fmt, args);
-	va_end(args);
-	if (len > count) {
-		tempbuf[count] = '\0';
-	}
-	spdlog::log(spdlog::level::warn, tempbuf);
-
-	return tempbuf;
-}
 
 
 namespace Hook
 {
 
-
 	RE::PlayerCharacter* player;
 	RE::PlayerCamera* pcam;
 	ScopeDataHandler* sdh;
 
-	float cachedLeftConstraintPct;    // 3C
-	float cachedRightConstraintPct;  // 40
-	float cachedTopConstraintPct;     // 44
-	float cachedBottomConstraintPct;  // 48
-	
 	bool legacyFlag = true;
 
 	#define LF(f) (legacyFlag ? (f) : (f) / 1000.0f)
@@ -343,8 +213,6 @@ namespace Hook
 		return hr;
 	}
 
-
-	bool isCapturing = false;
 	LRESULT __stdcall D3D::WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	{
 
@@ -362,18 +230,6 @@ namespace Hook
 						auto input = (RE::BSInputDeviceManager::GetSingleton());
 						RE::ControlMap::GetSingleton()->ignoreKeyboardMouse = isShow;		
 					}
-
-					if (!isPressed&& wParam == VK_HOME) {
-						if (rdoc_api) {
-							if (!isCapturing) {
-								rdoc_api->StartFrameCapture(nullptr, nullptr);
-								isCapturing = true;
-							} else {
-								rdoc_api->EndFrameCapture(nullptr, nullptr);
-								isCapturing = false;
-							}
-						}
-					}
 				}
 				break;
 			case WM_MOUSEWHEEL:
@@ -387,7 +243,11 @@ namespace Hook
 
 		io = ImGui::GetIO();
 
-		ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
+		if (isShow)
+		{
+			ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
+			return true;
+		}
 		return CallWindowProc(oldFuncs.wndProc, hWnd, msg, wParam, lParam);
 
 	}
@@ -402,8 +262,8 @@ namespace Hook
 		XMMATRIX projectionMatrix = XMMatrixPerspectiveFovLH(
 			fov,                         // Field of view angle
 			windowWidth / windowHeight,  // Aspect ratio
-			NEAR_PLANE,                  // Near clipping plane distance
-			FAR_PLANE                    // Far clipping plane distance
+			0.1f,                  // Near clipping plane distance
+			1000.0f                    // Far clipping plane distance
 		);
 
 		return projectionMatrix;
@@ -634,17 +494,7 @@ namespace Hook
 			mRTShaderResourceView.GetAddressOf());
 
 		//------------------------------
-		// 4. 创建输出渲染目标纹理及视图 (1024x1024)
-		//------------------------------
-		CreateTextureAndViews(
-			g_Device.Get(),
-			1024, 1024, DXGI_FORMAT_R8G8B8A8_UNORM,
-			mOutPutRTRenderTargetTexture.GetAddressOf(),
-			mOutPutRTRenderTargetView.GetAddressOf(),
-			mOutPutRTShaderResourceView.GetAddressOf());
-
-		//------------------------------
-		// 5. 创建目标纹理及SRV（仅绑定到着色器资源）
+		// 4. 创建目标纹理及SRV（仅绑定到着色器资源）
 		//------------------------------
 		constexpr DXGI_FORMAT srcFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 		const UINT bindFlags = D3D11_BIND_SHADER_RESOURCE;  // 只绑定SRV
@@ -812,30 +662,6 @@ namespace Hook
 		
 	}
 
-	void DoCullWeapon(bool isCull)
-	{
-		using namespace RE;
-		std::optional<PlayerCharacter*> _player = PlayerCharacter::GetSingleton();
-		if (!_player.has_value())
-			return;
-
-		NiPointer<NiNode> playerModel = (*_player)->firstPerson3D;
-		if (!playerModel)
-			return;
-
-		std::optional<NiObject*> weaponBaseObj = playerModel->GetObjectByName("Weapon");
-		if (!weaponBaseObj.has_value())
-			return;
-
-		NiPointer<NiNode> weaponBaseNode((*weaponBaseObj)->IsNode());
-		if (weaponBaseNode && !weaponBaseNode->children.empty()) {
-			//weaponBaseNode->CullGeometry(isCull);
-			//weaponBaseNode->IsGeometry()->
-			weaponBaseNode->SetAppCulled(isCull);
-		}
-	}
-
-
 	void D3D::GrabScreen()
 	{
 		//DoCullWeapon(true);
@@ -987,7 +813,7 @@ namespace Hook
 
 			SetupCommonRenderState(
 				mRTRenderTargetTexture.Get(), targetVS.Get(), targetVSClassInstance.GetAddressOf(), targetVSNumClassesInstance, m_outPutPixelShader.Get(), targetInputLayout.Get(),
-				BSTransparent.Get(), vsCBuffersSlots, targetIndexBuffer, DXGI_FORMAT_R16_UINT, targetIndexBufferOffset, targetVertexBuffer.GetAddressOf(), &targetVertexBufferStrides,
+				BSTransparent.Get(), vsCBuffersSlots, targetIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, targetIndexBufferOffset, targetVertexBuffer.GetAddressOf(), &targetVertexBufferStrides,
 				&targetVertexBufferOffsets, 1);
 
 			// 新版特有资源绑定
@@ -1059,11 +885,9 @@ namespace Hook
 		}
 	}
 
-
-
-
 	void __stdcall D3D::DrawIndexedHook(ID3D11DeviceContext* pContext, UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation)
 	{
+
 		bool needToBeCull = false;
 
 		if (bSelfDraw) {
@@ -1199,8 +1023,6 @@ namespace Hook
 				D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
 				
 				g_Context->OMSetRenderTargets(1, &tempRt, tempSV);
-
-				bHasDraw = true;
 			}
 		}
 	}
@@ -1243,7 +1065,7 @@ namespace Hook
 				ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 			else
 			{
-				_MESSAGE("Can't Get DrawData. ReIniting");
+				logger::warn("Can't Get DrawData. ReIniting");
 			}
 		}
 		else
@@ -1263,12 +1085,6 @@ namespace Hook
 		return oldFuncs.clipCursor(lpRect);
 	}
 
-	void __stdcall D3D::vsSetConstantBuffers(ID3D11DeviceContext* pContext, UINT StartSlot, UINT NumBuffers, ID3D11Buffer* const* ppConstantBuffers)
-	{
-
-		oldFuncs.vsSetConstantBuffers(pContext, StartSlot, NumBuffers, ppConstantBuffers);
-	}
-
 
 	D3D* D3D::GetSington()
 	{
@@ -1276,53 +1092,6 @@ namespace Hook
 		return &instance;
 	}
 
-
-	bool D3D::Register() noexcept
-	{
-		using namespace REL;
-		logger::info("Register Start!");
-
-		return true;
-	}
-
-	void __stdcall D3D::hookD3D11CreateQuery(ID3D11Device* pDevice, const D3D11_QUERY_DESC* pQueryDesc, ID3D11Query** ppQuery)
-	{
-		if (pQueryDesc->Query == D3D11_QUERY_OCCLUSION) {
-			D3D11_QUERY_DESC oqueryDesc = CD3D11_QUERY_DESC();
-			(&oqueryDesc)->MiscFlags = pQueryDesc->MiscFlags;
-			(&oqueryDesc)->Query = D3D11_QUERY_TIMESTAMP;
-
-			return oldFuncs.phookD3D11CreateQuery(pDevice, &oqueryDesc, ppQuery);
-		}
-
-		return oldFuncs.phookD3D11CreateQuery(pDevice, pQueryDesc, ppQuery);
-	}
-
-	UINT pssrStartSlot;
-	D3D11_SHADER_RESOURCE_VIEW_DESC Descr;
-
-	void __stdcall D3D::hookD3D11PSSetShaderResources(ID3D11DeviceContext* pContext, UINT StartSlot, UINT NumViews, ID3D11ShaderResourceView* const* ppShaderResourceViews)
-	{
-		pssrStartSlot = StartSlot;
-
-		for (UINT j = 0; j < NumViews; j++) {
-			ID3D11ShaderResourceView* pShaderResView = ppShaderResourceViews[j];
-			if (pShaderResView) {
-				pShaderResView->GetDesc(&Descr);
-
-				if ((Descr.ViewDimension == D3D11_SRV_DIMENSION_BUFFER) || (Descr.ViewDimension == D3D11_SRV_DIMENSION_BUFFEREX)) {
-					continue;  //Skip buffer resources
-				}
-			}
-		}
-
-		return oldFuncs.phookD3D11PSSetShaderResources(pContext, StartSlot, NumViews, ppShaderResourceViews);
-	}
-
-	void __stdcall D3D::ClearRenderTargetViewHook(ID3D11DeviceContext* pContext, ID3D11RenderTargetView* pRenderTargetView, const FLOAT ColorRGBA[4])
-	{
-		return oldFuncs.phookD3D11ClearRenderTargetViewHook(pContext, pRenderTargetView, ColorRGBA);
-	}
 
 	bool CreateAndEnableHook(void* target, void* hook, void** original, const char* hookName)
 	{
@@ -1352,8 +1121,6 @@ namespace Hook
 			SetWindowLongPtr(sd.OutputWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(WndProcHandler)));
 	}
 
-	bool isActive_Blur = false;
-
 	struct HookedRender_TAA
 	{
 		// thunk 函数
@@ -1375,15 +1142,9 @@ namespace Hook
 	};
 
 
-	RE::TESImageSpaceModifier* BingleTunnelVisionForm;
-
-	
-	bool ImageSpaceModifierInstanceFormHookSelfCall = false;
-
-
 	DWORD __stdcall D3D::HookDX11_Init()
 	{
-		_MESSAGE("HookDX11_Init");
+		logger::info("HookDX11_Init");
 
 		const auto rendererData = RE::BSGraphics::RendererData::GetSingleton();
 		g_Swapchain = (IDXGISwapChain*)static_cast<void*>(rendererData->renderWindow->swapChain);
@@ -1392,7 +1153,7 @@ namespace Hook
 
 		EnableDebugPrivilege();
 
-		_MESSAGE("Post D3D11CreateDeviceAndSwapChain");
+		logger::info("Post D3D11CreateDeviceAndSwapChain");
 
 		// 获取虚函数表
 		pSwapChainVTable = *reinterpret_cast<DWORD_PTR**>(g_Swapchain.Get());
@@ -1400,7 +1161,7 @@ namespace Hook
 		pDeviceContextVTable = *reinterpret_cast<DWORD_PTR**>(g_Context.Get());
 
 		if (!g_bInitialised) {
-			_MESSAGE("\t[+] Present Hook called by first time");
+			logger::info("\t[+] Present Hook called by first time");
 			DXGI_SWAP_CHAIN_DESC sd;
 			g_Swapchain->GetDesc(&sd);
 			::GetWindowRect(sd.OutputWindow, &oldRect);
@@ -1414,11 +1175,11 @@ namespace Hook
 			InitWndHandler = true;
 		}
 
-		_MESSAGE("Get VTable");
+		logger::info("Get VTable");
 
 		// 初始化MinHook
 		if (MH_Initialize() != MH_OK) {
-			_MESSAGE("Failed to initialize MinHook");
+			logger::error("Failed to initialize MinHook");
 			return 1;
 		}
 
@@ -1427,27 +1188,24 @@ namespace Hook
 		const std::pair<DWORD_PTR*, HookInfo> hooks[] = {
 			{ pSwapChainVTable, HookInfo{ 8, reinterpret_cast<void*>(PresentHook), reinterpret_cast<void**>(&oldFuncs.phookD3D11Present), "PresentHook" } },
 			{ pDeviceContextVTable, HookInfo{ 12, reinterpret_cast<void*>(DrawIndexedHook), reinterpret_cast<void**>(&oldFuncs.phookD3D11DrawIndexed), "DrawIndexedHook" } },
-			{ pDeviceVTable, HookInfo{ 24, reinterpret_cast<void*>(hookD3D11CreateQuery), reinterpret_cast<void**>(&oldFuncs.phookD3D11CreateQuery), "hookD3D11CreateQuery" } },
-			{ pDeviceContextVTable, HookInfo{ 8, reinterpret_cast<void*>(hookD3D11PSSetShaderResources), reinterpret_cast<void**>(&oldFuncs.phookD3D11PSSetShaderResources), "hookD3D11PSSetShaderResources" } },
-			{ pSwapChainVTable, HookInfo{ 50, reinterpret_cast<void*>(ClearRenderTargetViewHook), reinterpret_cast<void**>(&oldFuncs.phookD3D11ClearRenderTargetViewHook), "ClearRenderTargetViewHook" } },
 		};
 
 		for (const auto& [vtable, info] : hooks) {
 			CreateAndEnableHook(reinterpret_cast<void*>(vtable[info.index]), info.hook, info.original, info.name);
 		}
 
+		CreateAndEnableHook(&ClipCursor, ClipCursorHook, reinterpret_cast<LPVOID*>(&oldFuncs.clipCursor), "ClipCursorHook");
+
 		REL::Relocation<std::uintptr_t> vtable_TAA(RE::ImageSpaceEffectTemporalAA::VTABLE[0]);
 		const auto oldFuncTAA = vtable_TAA.write_vfunc(1, reinterpret_cast<std::uintptr_t>(&HookedRender_TAA::thunk));
 		HookedRender_TAA::func = REL::Relocation<decltype(HookedRender_TAA::thunk)*>(oldFuncTAA);
 
-		_MESSAGE("Install Hook");
+		logger::info("Install Hook");
 
 		DWORD old_protect;
 		VirtualProtect(oldFuncs.phookD3D11Present, 2, PAGE_EXECUTE_READWRITE, &old_protect);
 
-		_MESSAGE("VirtualProtect");
-
-		Register();
+		logger::info("VirtualProtect");
 
 		return S_OK;
 	}

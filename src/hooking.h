@@ -1,6 +1,5 @@
 #pragma once
 
-#include <stdint.h>
 #include <d3d11.h>
 #include <DirectXMath.h>
 #include <wrl/client.h>
@@ -12,15 +11,15 @@
 #define D3D11_HOOK_API
 #define SAFE_RELEASE(p) { if ((p)) { (p)->Release(); (p) = nullptr; } }
 #ifndef HR
-#	define HR(x) { HRESULT hr = (x);  if (FAILED(hr)) {_MESSAGE("[-] %s, %i, %i",__FILE__, __LINE__ , hr);}}
+#	define HR(x)                                                 \
+		{                                                         \
+			HRESULT hr = (x);                                     \
+			if (FAILED(hr)) {                                     \
+				logger::error("[-] {}, {}, {}", __FILE__, __LINE__, hr); \
+			}                                                     \
+		}
 #endif
 
-void SafeWriteBuf(uintptr_t addr, void* data, size_t len);
-void SafeWrite64(uintptr_t addr, UInt64 data);
-//void* GetIATAddr(void* module, const char* searchDllName, const char* searchImportName);
-
-//template <class T>
-//using ComPtr = Microsoft::WRL::ComPtr<T>;
 
 template <class T>
 using ComPtr = REX::W32::ComPtr<T>;
@@ -43,52 +42,10 @@ namespace Hook
 
 	class D3D
 	{
-
-		HRESULT WINAPI HookedD3D11CreateDeviceAndSwapChain(
-			IDXGIAdapter* pAdapter,
-			D3D_DRIVER_TYPE DriverType,
-			HMODULE Software,
-			UINT Flags,
-			const D3D_FEATURE_LEVEL* pFeatureLevels,
-			UINT FeatureLevels,
-			UINT SDKVersion,
-			const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-			IDXGISwapChain** ppSwapChain,
-			ID3D11Device** ppDevice,
-			D3D_FEATURE_LEVEL* pFeatureLevel,
-			ID3D11DeviceContext** ppImmediateContext);
-
-		using CreateDeviceAndSwapChain = decltype(&D3D11CreateDeviceAndSwapChain);
-
-		using ClearState = HRESULT(__stdcall*)(ID3D11DeviceContext*);
 		using Present = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
-		using OMSetRenderTargets = void(WINAPI*)(ID3D11DeviceContext*,
-			__in_range(0, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT) UINT NumViews,
-			__in_ecount_opt(NumViews) ID3D11RenderTargetView* const* ppRenderTargetViews,
-			__in_opt ID3D11DepthStencilView* pDepthStencilView);
 		using ClipCur = decltype(&ClipCursor);
-		
-		using vfn_DeviceContext_ClearDepthStencilView = void(WINAPI*)(ID3D11DeviceContext*,ID3D11DepthStencilView*,UINT,FLOAT,UINT8);
-		typedef int(__stdcall* origClearRenderTargetView)(ID3D11DeviceContext* DeviceContext, ID3D11RenderTargetView* TargetView, const FLOAT ColorRGBA[4]);
-		typedef HRESULT(__stdcall* D3D11ResizeBuffersHook)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
-		typedef void(__stdcall* D3D11PSSetShaderResourcesHook)(ID3D11DeviceContext* , UINT , UINT , ID3D11ShaderResourceView* const* );
-
-		typedef void(__stdcall* D3D11VSSetConstantBuffers)(ID3D11DeviceContext* ,UINT, UINT, ID3D11Buffer* const*);
-		typedef void(__stdcall* tdefDrawIndexed)(ID3D11DeviceContext*, UINT, UINT, INT);
-		typedef HRESULT(__stdcall* tdefCreateBuffer)(ID3D11Device*, struct D3D11_BUFFER_DESC const*, struct D3D11_SUBRESOURCE_DATA const*, struct ID3D11Buffer**);
-
 		typedef HRESULT(__stdcall* D3D11PresentHook)(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
 		typedef void(__stdcall* D3D11DrawIndexedHook)(ID3D11DeviceContext* pContext, UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
-		typedef void(__stdcall* D3D11CreateQueryHook)(ID3D11Device* pDevice, const D3D11_QUERY_DESC* pQueryDesc, ID3D11Query** ppQuery);
-		typedef void(__stdcall* D3D11PSSetShaderResourcesHook)(ID3D11DeviceContext* pContext, UINT StartSlot, UINT NumViews, ID3D11ShaderResourceView* const* ppShaderResourceViews);
-		typedef void(__stdcall* D3D11ClearRenderTargetViewHook)(ID3D11DeviceContext* pContext, ID3D11RenderTargetView* pRenderTargetView, const FLOAT ColorRGBA[4]);
-		typedef HRESULT(WINAPI* CreateVertexShader_t)(ID3D11Device* device, const void* pShaderBytecode, SIZE_T bytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader);
-		typedef HRESULT(WINAPI* CreatePixelShader_t)(ID3D11Device* device, const void* pShaderBytecode, SIZE_T bytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11PixelShader** ppPixelShader);
-
-
-
-	public:
-		tdefDrawIndexed tdefDrawIndexed_t;
 		
 
 	private:
@@ -98,9 +55,6 @@ namespace Hook
 		
 		static D3D* GetSington();
 
-		static [[nodiscard]] bool Register() noexcept;
-
-	
 	public:
 
 		__declspec(align(16)) struct ConstBufferData
@@ -180,7 +134,6 @@ namespace Hook
 			XMFLOAT4 rect;
 		};
 
-
 		struct GameConstBuffer
 		{
 			RE::NiPoint3 virDir;
@@ -199,17 +152,14 @@ namespace Hook
 	public:
 
 		D3D11_HOOK_API void ImplHookDX11_Init(HMODULE hModule, void* hwnd);
-		//void __stdcall Hook();
 		void EnableRender(bool flag) { isEnableRender = flag; }
 		void Render();
 		bool InitEffect();
 		void InitLegacyEffect();
 		bool InitResource();
-		void InitInputLayout();
 		void OnResize();
 		void UpdateScene(ScopeData::FTSData*);
 		void ShowMenu(bool);
-		void EnableCursor(bool enable);
 		static void RenderImGui();
 		bool GetIsShow() { return isShow; };
 		void CreateBlender();
@@ -219,9 +169,6 @@ namespace Hook
 		void RenderToReticleTexture();
 		void RenderToReticleTextureNew(UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
 		void MapScopeEffectBuffer(ScopeEffectShaderData);
-		void detourDirectXPresent();
-		void detourDirectXDrawIndexed();
-		void CreateDx12Device();
 
 		RE::NiPoint3 WorldToScreen(RE::NiAVObject* cam, RE::NiAVObject* obj, float fov);
 
@@ -235,18 +182,10 @@ namespace Hook
 		D3D& operator=(const D3D&) = delete;
 		D3D& operator=(D3D&&) = delete;
 
-		static HRESULT __stdcall D3D11CreateDeviceAndSwapChainHook(IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL*, UINT, UINT, const DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**, ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**);
 		static LRESULT __stdcall WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 		static BOOL __stdcall ClipCursorHook(RECT*);
-		static void __stdcall vsSetConstantBuffers(ID3D11DeviceContext* pContext, UINT, UINT, ID3D11Buffer* const*);
-
 		static HRESULT __stdcall PresentHook(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
 		static void __stdcall DrawIndexedHook(ID3D11DeviceContext* pContext, UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
-		static void __stdcall hookD3D11CreateQuery(ID3D11Device* pDevice, const D3D11_QUERY_DESC* pQueryDesc, ID3D11Query** ppQuery);
-		static void __stdcall hookD3D11PSSetShaderResources(ID3D11DeviceContext* pContext, UINT StartSlot, UINT NumViews, ID3D11ShaderResourceView* const* ppShaderResourceViews);
-		static void __stdcall ClearRenderTargetViewHook(ID3D11DeviceContext* pContext, ID3D11RenderTargetView* pRenderTargetView, const FLOAT ColorRGBA[4]);
-		static HRESULT WINAPI CreateVertexShaderHook(ID3D11Device* device, const void* pShaderBytecode, SIZE_T bytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11VertexShader** ppVertexShader);
-		static HRESULT WINAPI CreatePixelShaderHook(ID3D11Device* device, const void* pShaderBytecode, SIZE_T bytecodeLength, ID3D11ClassLinkage* pClassLinkage, ID3D11PixelShader** ppPixelShader);
 
 		DWORD __stdcall HookDX11_Init();
 		void InitializeImGui(IDXGISwapChain* swapChain, ID3D11Device* device, ID3D11DeviceContext* context);
@@ -290,28 +229,10 @@ namespace Hook
 
 		struct OldFuncs
 		{
-			CreateDeviceAndSwapChain d3dCreateDevice;
-			ClearState d3dClear;
-			Present d3dPresent;
 			ClipCur clipCursor;
 			WNDPROC wndProc;
-			OMSetRenderTargets omSetRenderTargets;
-			vfn_DeviceContext_ClearDepthStencilView clearDepthStencilView;
-			D3D11ResizeBuffersHook resizeBuffersHook;
-			D3D11PSSetShaderResourcesHook setShaderResourcesHook;
-			origClearRenderTargetView clearRenderTargetView;
-			D3D11VSSetConstantBuffers vsSetConstantBuffers;
-
-			tdefDrawIndexed drawIndexed;
-			tdefCreateBuffer createBuffer;
-
 			D3D11PresentHook phookD3D11Present = nullptr;
 			D3D11DrawIndexedHook phookD3D11DrawIndexed = nullptr;
-			D3D11CreateQueryHook phookD3D11CreateQuery = nullptr;
-			D3D11PSSetShaderResourcesHook phookD3D11PSSetShaderResources = nullptr;
-			D3D11ClearRenderTargetViewHook phookD3D11ClearRenderTargetViewHook = nullptr;
-			CreateVertexShader_t phookD3D11VertexShaderHook = nullptr;
-			CreatePixelShader_t phookD3D11PixelShaderHook = nullptr;
 		};
 
 	public:
@@ -346,12 +267,12 @@ namespace Hook
 		static bool bStartScope;
 		static bool bFinishAimAnim;
 		static int bEnableNVG;
-		static bool bCanEnableNVGEffect;
 		static bool bQueryRender;
 		static bool bIsUpscaler;
 		static bool bIsInGame;
 
 	private:
+		RE::TESImageSpaceModifier* BingleTunnelVisionForm;
 		ID3D11Texture2D* m_DstTexture = nullptr;
 		ID3D11ShaderResourceView* m_DstView = nullptr;
 
@@ -361,7 +282,6 @@ namespace Hook
 
 		ComPtr<ID3D11Buffer> m_pConstantBufferData = nullptr;
 		ComPtr<ID3D11Buffer> m_pScopeEffectBuffer = nullptr;
-		ComPtr<ID3D11Buffer> m_pGameConstBuffer = nullptr;
 		ComPtr<ID3D11Buffer> m_VSBuffer = nullptr;
 		ComPtr<ID3D11Buffer> m_VSOutBuffer = nullptr;
 
@@ -378,7 +298,6 @@ namespace Hook
 		ComPtr<ID3D11RenderTargetView> m_pRenderTargetView;
 		ComPtr<ID3D11DepthStencilView> m_pDepthStencilView;
 		ComPtr<ID3D11SamplerState> m_pSamplerState; 
-		ComPtr<ID3D11SamplerState> m_pSamplerStateReticle; 
 
 		ComPtr<ID3D11BlendState> BSAlphaToCoverage; 
 		ComPtr<ID3D11BlendState> BSTransparent; 
@@ -387,34 +306,20 @@ namespace Hook
 		ComPtr<ID3D11Resource> mTextDDS_Res;
 
 		ID3D11Texture2D* mBackBuffer;
-		ID3D11Texture2D* mBackBufferCopy;
 		ID3D11Texture2D* mRealBackBuffer;
-
-
-		ComPtr<ID3D11Texture2D> mDynamicTexture;
-		D3D11_TEXTURE2D_DESC bbDesc;
 
 		ComPtr<ID3D11ShaderResourceView> mTextDDS_SRV;
 		ComPtr<ID3D11ShaderResourceView> mShaderResourceView;
 
 
 		ScopeEffectShaderData scopeData;
-		VSOutConstantData VSOutData;
 		GameConstBuffer gameConstBuffer;
 		ConstBufferData constBufferData;
 		VSConstantData vsConstanData;
 		
-		ID3D11RenderTargetView* backBufferRTV;
-
 		ComPtr<ID3D11Texture2D> mRTRenderTargetTexture;
 		ComPtr<ID3D11RenderTargetView> mRTRenderTargetView;
 		ComPtr<ID3D11ShaderResourceView> mRTShaderResourceView;
-
-		ComPtr<ID3D11Texture2D> mOutPutRTRenderTargetTexture;
-		ComPtr<ID3D11RenderTargetView> mOutPutRTRenderTargetView;
-		ComPtr<ID3D11ShaderResourceView> mOutPutRTShaderResourceView;
-
-		
 
 	};
 }
