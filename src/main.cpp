@@ -748,7 +748,7 @@ DWORD WINAPI MainThread(HMODULE hModule)
 		Sleep(10);
 	}
 
-	hookIns = Hook::D3D::GetSington();
+	
 	hookIns->ImplHookDX11_Init(hModule, BSGraphics::RendererData::GetSingleton()->renderWindow->hwnd);
 
 	imgui_Impl = ImGuiImpl::ImGuiImplClass::GetSington();
@@ -898,6 +898,10 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 #endif
 
 	F4SE::Init(a_f4se);
+	hookIns = Hook::D3D::GetSington();
+#ifdef _DEBUG
+	hookIns->InitRenderDoc();
+#endif  // _DEBUG
 
 	F4SE::Trampoline& trampoline = F4SE::GetTrampoline();
 	PCUpdateMainThreadOrig = trampoline.write_call<5>(ptr_PCUpdateMainThread.address(), &HookedUpdate);

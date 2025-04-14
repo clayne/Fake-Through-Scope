@@ -54,7 +54,7 @@ namespace Hook
 	public:
 		
 		static D3D* GetSington();
-
+		void InitRenderDoc();
 	public:
 
 		__declspec(align(16)) struct ConstBufferData
@@ -165,7 +165,7 @@ namespace Hook
 		void CreateBlender();
 		void QueryChangeReticleTexture();
 		void ResetZoomDelta();
-		void GrabScreen();
+		void ScreenTextureMod();
 		void RenderToReticleTexture();
 		void RenderToReticleTextureNew(UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
 		void MapScopeEffectBuffer(ScopeEffectShaderData);
@@ -219,7 +219,7 @@ namespace Hook
 			ID3D11Buffer* const* vertexBuffers,
 			const UINT* strides,
 			const UINT* offsets,
-			UINT numVertexBuffers);
+			UINT numVertexBuffers,ID3D11RenderTargetView* backBufferRTV);
 
 		void LoadAimTexture(const std::string& path);
 		template <typename T>

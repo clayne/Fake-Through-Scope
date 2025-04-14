@@ -149,9 +149,6 @@ target_include_directories(
 		#E:/CInclude
 		${CMAKE_CURRENT_BINARY_DIR}/include
 		${CMAKE_CURRENT_SOURCE_DIR}/src
-		#${CMAKE_CURRENT_SOURCE_DIR}/../DirectX-Headers/include
-		#${CMAKE_CURRENT_SOURCE_DIR}/../imgui-1.89
-		#${CMAKE_CURRENT_SOURCE_DIR}/../bsa
 		${CMAKE_CURRENT_SOURCE_DIR}/include
 		${IMGUI_INCLUDE_DIRS}
 
@@ -227,8 +224,8 @@ if(true)
 		#COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PDB_FILE:${PROJECT_NAME}> "G:/Modding/MO2/mods/FTS/F4SE/Plugins/"
 		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> "${Fallout4Path}/Data/F4SE/Plugins/"
 		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PDB_FILE:${PROJECT_NAME}> "${Fallout4Path}/Data/F4SE/Plugins/"
-		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> "G:/Games/FO4_SO/mods/Fake Through Scope testing/F4SE/Plugins/"
-		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PDB_FILE:${PROJECT_NAME}> "G:/Games/FO4_SO/mods/Fake Through Scope testing/F4SE/Plugins/"
+		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> "G:/Games/FO4_SO/mods/Fake Through Scope testing fts/F4SE/Plugins/"
+		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_PDB_FILE:${PROJECT_NAME}> "G:/Games/FO4_SO/mods/Fake Through Scope testing fts/F4SE/Plugins/"
 	)
 else ()
 	message(

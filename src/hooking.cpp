@@ -13,11 +13,16 @@
 
 #include <MathUtils.h>
 #include "hookingStruct.h"
+#include <renderdoc_app.h>
+
+#include <d3d9.h>
+
 
 #pragma comment(lib, "D3DCompiler.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3d9.lib")
 #pragma comment(lib, "shlwapi.lib")
 
 
@@ -49,6 +54,7 @@ bool EnableDebugPrivilege()
 }
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+RENDERDOC_API_1_6_0* rdoc_api = nullptr;
 
 static constexpr UINT TARGET_STRIDE = 20;
 static constexpr UINT TARGET_INDEX_COUNT = 24;
@@ -113,7 +119,7 @@ ImGuiImpl::ImGuiImplClass* imguiImpl;
 IDXGISwapChain3* mSwapChain3;
 bool InitWndHandler = false;
 
-ID3D11RenderTargetView* tempRt;
+ID3D11RenderTargetView* tempRt[2] = {};
 ID3D11DepthStencilView* tempSV;
 
 UINT targetIndexCount = 0;
@@ -145,6 +151,50 @@ ID3D11InputLayout* gdc_pVertexLayout = NULL;
 ID3D11Buffer* gdc_pIndexBuffer = NULL;
 
 using namespace ScopeData;
+
+constexpr UINT MAX_SRV_SLOTS = 128;     // D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT
+constexpr UINT MAX_SAMPLER_SLOTS = 16;  // D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT
+constexpr UINT MAX_CB_SLOTS = 14;       // D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT
+using namespace RE::BSGraphics;
+
+struct SavedState
+{
+	// IA Stage
+	ID3D11InputLayout* pInputLayout;
+	ID3D11Buffer* pVertexBuffers[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT];
+	UINT VertexStrides[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT];
+	UINT VertexOffsets[D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT];
+	ID3D11Buffer* pIndexBuffer;
+	DXGI_FORMAT IndexBufferFormat;
+	UINT IndexBufferOffset;
+	D3D11_PRIMITIVE_TOPOLOGY PrimitiveTopology;
+
+	// VS Stage
+	ID3D11VertexShader* pVS;
+	ID3D11Buffer* pVSCBuffers[MAX_CB_SLOTS];
+	ID3D11ShaderResourceView* pVSSRVs[MAX_SRV_SLOTS];
+	ID3D11SamplerState* pVSSamplers[MAX_SAMPLER_SLOTS];
+
+	// PS Stage
+	ID3D11PixelShader* pPS;
+	ID3D11Buffer* pPSCBuffers[MAX_CB_SLOTS];
+	ID3D11ShaderResourceView* pPSSRVs[MAX_SRV_SLOTS];
+	ID3D11SamplerState* pPSSamplers[MAX_SAMPLER_SLOTS];
+
+	// RS Stage
+	D3D11_VIEWPORT Viewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+	UINT NumViewports;
+	ID3D11RasterizerState* pRasterizerState;
+
+	// OM Stage
+	ID3D11RenderTargetView* pRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
+	ID3D11DepthStencilView* pDSV;
+	ID3D11BlendState* pBlendState;
+	FLOAT BlendFactor[4];
+	UINT SampleMask;
+	ID3D11DepthStencilState* pDepthStencilState;
+	UINT StencilRef;
+};
 
 
 namespace Hook
@@ -267,6 +317,81 @@ namespace Hook
 		);
 
 		return projectionMatrix;
+	}
+
+	void SaveState(ID3D11DeviceContext* pContext, SavedState& state)
+	{
+		// IA Stage
+		pContext->IAGetInputLayout(&state.pInputLayout);
+		pContext->IAGetVertexBuffers(0, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT,
+			state.pVertexBuffers, state.VertexStrides, state.VertexOffsets);
+		pContext->IAGetIndexBuffer(&state.pIndexBuffer, &state.IndexBufferFormat, &state.IndexBufferOffset);
+		pContext->IAGetPrimitiveTopology(&state.PrimitiveTopology);
+		// VS Stage
+		pContext->VSGetShader(&state.pVS, nullptr, nullptr);
+		pContext->VSGetConstantBuffers(0, MAX_CB_SLOTS, state.pVSCBuffers);
+		pContext->VSGetShaderResources(0, MAX_SRV_SLOTS, state.pVSSRVs);
+		pContext->VSGetSamplers(0, MAX_SAMPLER_SLOTS, state.pVSSamplers);
+		// PS Stage
+		pContext->PSGetShader(&state.pPS, nullptr, nullptr);
+		pContext->PSGetConstantBuffers(0, MAX_CB_SLOTS, state.pPSCBuffers);
+		pContext->PSGetShaderResources(0, MAX_SRV_SLOTS, state.pPSSRVs);
+		pContext->PSGetSamplers(0, MAX_SAMPLER_SLOTS, state.pPSSamplers);
+		// RS Stage
+		state.NumViewports = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+		pContext->RSGetViewports(&state.NumViewports, state.Viewports);
+		pContext->RSGetState(&state.pRasterizerState);
+		// OM Stage
+		pContext->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, state.pRTVs, &state.pDSV);
+		pContext->OMGetBlendState(&state.pBlendState, state.BlendFactor, &state.SampleMask);
+		pContext->OMGetDepthStencilState(&state.pDepthStencilState, &state.StencilRef);
+	}
+
+	void RestoreState(ID3D11DeviceContext* pContext, SavedState& state)
+	{
+		// IA Stage
+		pContext->IASetInputLayout(state.pInputLayout);
+		pContext->IASetVertexBuffers(0, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT,
+			state.pVertexBuffers, state.VertexStrides, state.VertexOffsets);
+		pContext->IASetIndexBuffer(state.pIndexBuffer, state.IndexBufferFormat, state.IndexBufferOffset);
+		pContext->IASetPrimitiveTopology(state.PrimitiveTopology);
+		// VS Stage
+		pContext->VSSetShader(state.pVS, nullptr, 0);
+		pContext->VSSetConstantBuffers(0, MAX_CB_SLOTS, state.pVSCBuffers);
+		pContext->VSSetShaderResources(0, MAX_SRV_SLOTS, state.pVSSRVs);
+		pContext->VSSetSamplers(0, MAX_SAMPLER_SLOTS, state.pVSSamplers);
+		// PS Stage
+		pContext->PSSetShader(state.pPS, nullptr, 0);
+		pContext->PSSetConstantBuffers(0, MAX_CB_SLOTS, state.pPSCBuffers);
+		pContext->PSSetShaderResources(0, MAX_SRV_SLOTS, state.pPSSRVs);
+		pContext->PSSetSamplers(0, MAX_SAMPLER_SLOTS, state.pPSSamplers);
+		// RS Stage
+		pContext->RSSetViewports(state.NumViewports, state.Viewports);
+		pContext->RSSetState(state.pRasterizerState);
+		// OM Stage
+		pContext->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, state.pRTVs, state.pDSV);
+		pContext->OMSetBlendState(state.pBlendState, state.BlendFactor, state.SampleMask);
+		pContext->OMSetDepthStencilState(state.pDepthStencilState, state.StencilRef);
+		// 释放临时引用
+#define SAFE_RELEASE_ARRAY(arr, count) \
+	for (UINT i = 0; i < count; ++i) SAFE_RELEASE(arr[i])
+		SAFE_RELEASE(state.pInputLayout);
+		SAFE_RELEASE_ARRAY(state.pVertexBuffers, D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT);
+		SAFE_RELEASE(state.pIndexBuffer);
+		SAFE_RELEASE(state.pVS);
+		SAFE_RELEASE_ARRAY(state.pVSCBuffers, MAX_CB_SLOTS);
+		SAFE_RELEASE_ARRAY(state.pVSSRVs, MAX_SRV_SLOTS);
+		SAFE_RELEASE_ARRAY(state.pVSSamplers, MAX_SAMPLER_SLOTS);
+		SAFE_RELEASE(state.pPS);
+		SAFE_RELEASE_ARRAY(state.pPSCBuffers, MAX_CB_SLOTS);
+		SAFE_RELEASE_ARRAY(state.pPSSRVs, MAX_SRV_SLOTS);
+		SAFE_RELEASE_ARRAY(state.pPSSamplers, MAX_SAMPLER_SLOTS);
+		SAFE_RELEASE(state.pRasterizerState);
+		SAFE_RELEASE_ARRAY(state.pRTVs, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT);
+		SAFE_RELEASE(state.pDSV);
+		SAFE_RELEASE(state.pBlendState);
+		SAFE_RELEASE(state.pDepthStencilState);
+#undef SAFE_RELEASE_ARRAY
 	}
 
 	RE::NiPoint3 D3D::WorldToScreen(RE::NiAVObject* cam, RE::NiAVObject* obj,float fov)
@@ -662,7 +787,7 @@ namespace Hook
 		
 	}
 
-	void D3D::GrabScreen()
+	void D3D::ScreenTextureMod()
 	{
 		//DoCullWeapon(true);
 
@@ -683,8 +808,6 @@ namespace Hook
 		g_Context->IASetIndexBuffer(gdc_pIndexBuffer, DXGI_FORMAT_R32_UINT, offset);
 		g_Context->IASetVertexBuffers(0, 1, &gdc_pVertexBuffer, &stride, &offset);
 
-		
-
 		g_Context->OMSetBlendState(BSTransparent.Get(), nullptr, 0xFFFFFFFF);
 		g_Context->PSSetSamplers(0, 1, m_pSamplerState.GetAddressOf());
 
@@ -694,15 +817,13 @@ namespace Hook
 		g_Context->PSSetShaderResources(4, 1, D3DInstance->mShaderResourceView.GetAddressOf());
 		g_Context->PSSetShaderResources(5, 1, D3DInstance->mTextDDS_SRV.GetAddressOf());
 
-		
-
 		bSelfDraw = true;
 		g_Context->DrawIndexed(3, 0, 0);
 		bSelfDraw = false;
 
 		//DoCullWeapon(false);
 
-		g_Context->OMSetRenderTargets(1, &tempRt, tempSV);
+		g_Context->OMSetRenderTargets(2, tempRt, tempSV);
 	}
 
 	 // 完整的公共渲染状态设置
@@ -710,7 +831,7 @@ namespace Hook
 		ID3D11Resource* sourceTexture, ID3D11VertexShader* vs, ID3D11ClassInstance* const* vsClassInstances, UINT vsClassInstancesCount,
 		ID3D11PixelShader* ps, ID3D11InputLayout* inputLayout, ID3D11BlendState* blendState, const std::vector<VSConstantBufferSlot>& vsCBSlots,
 		ID3D11Buffer* indexBuffer,DXGI_FORMAT indexFormat,UINT indexOffset,
-		ID3D11Buffer* const* vertexBuffers, const UINT* strides, const UINT* offsets, UINT numVertexBuffers)
+		ID3D11Buffer* const* vertexBuffers, const UINT* strides, const UINT* offsets, UINT numVertexBuffers, ID3D11RenderTargetView* backBufferRTV = nullptr)
 	{
 		// === 1. 深度模板状态配置 ===
 		D3D11_DEPTH_STENCIL_DESC tempDSD{};
@@ -733,8 +854,8 @@ namespace Hook
 		HR(g_Device->CreateDepthStencilState(&tempDSD, depthStencilState.GetAddressOf()));
 
 		// === 2. 核心渲染状态设置 ===
-		// 设置渲染目标
-		g_Context->OMSetRenderTargets(1, m_pRenderTargetView.GetAddressOf(), nullptr);
+		ID3D11RenderTargetView* rtvs[1] = { tempRt[1] };
+		g_Context->OMSetRenderTargets(1, rtvs, tempSV);
 
 		// 复制资源（关键修复点）
 		if (sourceTexture && m_DstTexture) {
@@ -858,22 +979,65 @@ namespace Hook
 		return texDesc.Width == TARGET_TEXTURE_WIDTH && texDesc.Height == TARGET_TEXTURE_WIDTH && texDesc.Format == TARGET_TEXTURE_FORMAT && srvDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D;
 	}
 
-	bool GetBufferInfo(ID3D11DeviceContext* pContext, BufferInfo& outVertexInfo, BufferInfo& outIndexInfo)
+	UINT GetVertexBuffersInfo(
+		ID3D11DeviceContext* pContext,
+		std::vector<BufferInfo>& outInfos,
+		UINT maxSlotsToCheck = D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT)
 	{
-		// 获取顶点缓冲区
-		Microsoft::WRL::ComPtr<ID3D11Buffer> _veBuffer;
-		pContext->IAGetVertexBuffers(0, 1, &_veBuffer, &outVertexInfo.stride, &outVertexInfo.offset);
-		if (_veBuffer)
-			_veBuffer->GetDesc(&outVertexInfo.desc);
+		outInfos.clear();
+
+		// 1. 直接尝试获取所有可能的槽位
+		std::vector<ID3D11Buffer*> buffers(maxSlotsToCheck);
+		std::vector<UINT> strides(maxSlotsToCheck);
+		std::vector<UINT> offsets(maxSlotsToCheck);
+
+		pContext->IAGetVertexBuffers(0, maxSlotsToCheck, buffers.data(), strides.data(), offsets.data());
+
+		// 2. 计算实际绑定的缓冲区数量
+		UINT actualCount = 0;
+		for (UINT i = 0; i < maxSlotsToCheck; ++i) {
+			if (buffers[i] != nullptr) {
+				actualCount++;
+			}
+		}
+
+		if (actualCount == 0)
+			return 0;
+
+		// 3. 填充输出结构
+		outInfos.resize(actualCount);
+		UINT validIndex = 0;
+		for (UINT i = 0; i < maxSlotsToCheck && validIndex < actualCount; ++i) {
+			if (buffers[i] != nullptr) {
+				outInfos[validIndex].stride = strides[i];
+				outInfos[validIndex].offset = offsets[i];
+				buffers[i]->GetDesc(&outInfos[validIndex].desc);
+				buffers[i]->Release();  // 释放获取的引用
+				validIndex++;
+			}
+		}
+
+		return actualCount;
+	}
+
+	bool GetIndexBufferInfo(ID3D11DeviceContext* pContext, BufferInfo& outInfo)
+	{
+		Microsoft::WRL::ComPtr<ID3D11Buffer> indexBuffer;
+		DXGI_FORMAT format;
 
 		// 获取索引缓冲区
-		Microsoft::WRL::ComPtr<ID3D11Buffer> _inBuffer;
-		DXGI_FORMAT _inFormat;
-		pContext->IAGetIndexBuffer(&_inBuffer, &_inFormat, &outIndexInfo.offset);
-		if (_inBuffer)
-			_inBuffer->GetDesc(&outIndexInfo.desc);
+		pContext->IAGetIndexBuffer(&indexBuffer, &format, &outInfo.offset);
 
-		return _veBuffer && _inBuffer;  // 返回是否成功获取
+		if (!indexBuffer)
+			return false;
+
+		// 获取缓冲区描述
+		indexBuffer->GetDesc(&outInfo.desc);
+
+		// 将格式信息存入stride（因为索引缓冲区没有stride概念）
+		outInfo.stride = (format == DXGI_FORMAT_R32_UINT) ? 4 : 2;
+
+		return true;
 	}
 
 	void CopyConstantBuffers(ID3D11DeviceContext* pContext,ID3D11Buffer* srcBuffers[],ID3D11Buffer* dstBuffers[],size_t count)
@@ -894,72 +1058,81 @@ namespace Hook
 			return oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
 		}
 
-		BufferInfo vertexInfo, indexInfo;
-		if (!GetBufferInfo(pContext, vertexInfo, indexInfo)) {
+		std::vector<BufferInfo> vertexInfo;
+		BufferInfo indexInfo;
+		if (!GetVertexBuffersInfo(pContext, vertexInfo) || !GetIndexBufferInfo(pContext, indexInfo)) {
 			return oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
 		}
 
-		if (!IsTargetDrawCall(vertexInfo, indexInfo, IndexCount)) {
-			return oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
-		}
+		if (IsTargetDrawCall(vertexInfo[0], indexInfo, IndexCount)) {
+			pContext->VSGetShader(targetVS.GetAddressOf(), targetVSClassInstance.GetAddressOf(), &targetVSNumClassesInstance);
+			pContext->PSGetShader(targetPS.GetAddressOf(), 0, 0);
+			pContext->OMGetDepthStencilState(targetDepthStencilState.GetAddressOf(), 0);
+			pContext->IAGetInputLayout(targetInputLayout.GetAddressOf());
 
-		pContext->VSGetShader(targetVS.GetAddressOf(), targetVSClassInstance.GetAddressOf(), &targetVSNumClassesInstance);
-		pContext->PSGetShader(targetPS.GetAddressOf(), 0, 0);
-		pContext->OMGetDepthStencilState(targetDepthStencilState.GetAddressOf(), 0);
-		pContext->IAGetInputLayout(targetInputLayout.GetAddressOf());
+			pContext->IAGetIndexBuffer(&targetIndexBuffer, &targetIndexBufferFormat, &targetIndexBufferOffset);
 
-		pContext->IAGetIndexBuffer(&targetIndexBuffer, &targetIndexBufferFormat, &targetIndexBufferOffset);
+			pContext->IAGetVertexBuffers(0, 1, targetVertexBuffer.GetAddressOf(), &targetVertexBufferStrides, &targetVertexBufferOffsets);
+			pContext->VSGetConstantBuffers(1, 1, &targetVertexConstBuffer);
+			pContext->VSGetConstantBuffers(2, 1, &targetVertexConstBuffer1p5);
+			pContext->VSGetConstantBuffers(12, 1, &targetVertexConstBuffer1);
 
-		pContext->IAGetVertexBuffers(0, 1, targetVertexBuffer.GetAddressOf(), &targetVertexBufferStrides, &targetVertexBufferOffsets);
-		pContext->VSGetConstantBuffers(1, 1, &targetVertexConstBuffer);
-		pContext->VSGetConstantBuffers(2, 1, &targetVertexConstBuffer1p5);
-		pContext->VSGetConstantBuffers(12, 1, &targetVertexConstBuffer1);
+			pContext->PSGetShaderResources(0, 1, DrawIndexedSRV.GetAddressOf());
 
-		pContext->PSGetShaderResources(0, 1, DrawIndexedSRV.GetAddressOf());
-
-		if (!DrawIndexedSRV.Get() || !oldFuncs.phookD3D11DrawIndexed) {
-			oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
-			return;
-		}
-
-		ID3D11Resource* pResource;
-		DrawIndexedSRV->GetResource(&pResource);
-		D3D11_SHADER_RESOURCE_VIEW_DESC tempSRVDesc;
-		DrawIndexedSRV->GetDesc(&tempSRVDesc);
-
-		// 获取资源的类型
-		D3D11_RESOURCE_DIMENSION dimension;
-		pResource->GetType(&dimension);
-
-		// 检查是否是 2D 纹理
-		if (dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
-			// 使用 QueryInterface 获取 ID3D11Texture2D 接口的指针
-			ID3D11Texture2D* pTexture2D = nullptr;
-			HRESULT hr = pResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&pTexture2D);
-			if (SUCCEEDED(hr)) {
-				// 获取纹理描述
-				D3D11_TEXTURE2D_DESC desc;
-				pTexture2D->GetDesc(&desc);
-
-				if (desc.Width == TARGET_TEXTURE_WIDTH && desc.Height == TARGET_TEXTURE_WIDTH 
-					&& desc.ArraySize == 1 && desc.Format == TARGET_TEXTURE_FORMAT && tempSRVDesc.Format == TARGET_TEXTURE_FORMAT 
-					&& tempSRVDesc.Texture2D.MipLevels == 1 && tempSRVDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D) {
-					if (targetVertexConstBuffer && targetVertexConstBuffer1p5 && targetVertexConstBuffer1) {
-
-						ID3D11Buffer* srcbuffers[] = { targetVertexConstBuffer, targetVertexConstBuffer1p5, targetVertexConstBuffer1 };
-						ID3D11Buffer* dstBuffers[] = { targetVertexConstBufferOutPut, targetVertexConstBufferOutPut1p5, targetVertexConstBufferOutPut1 };
-						CopyConstantBuffers(pContext, srcbuffers, dstBuffers, 3);
-					}
-
-					targetIndexCount = IndexCount;
-					targetStartIndexLocation = StartIndexLocation;
-					targetBaseVertexLocation = BaseVertexLocation;
-
-					return oldFuncs.phookD3D11DrawIndexed(pContext, 0, 0, 0);
-				}
-				SAFE_RELEASE(pTexture2D);
+			if (!DrawIndexedSRV.Get() || !oldFuncs.phookD3D11DrawIndexed) {
+				oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
+				return;
 			}
+
+			ID3D11Resource* pResource;
+			DrawIndexedSRV->GetResource(&pResource);
+			D3D11_SHADER_RESOURCE_VIEW_DESC tempSRVDesc;
+			DrawIndexedSRV->GetDesc(&tempSRVDesc);
+
+			// 获取资源的类型
+			D3D11_RESOURCE_DIMENSION dimension;
+			pResource->GetType(&dimension);
+
+			// 检查是否是 2D 纹理
+			if (dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
+				// 使用 QueryInterface 获取 ID3D11Texture2D 接口的指针
+				ID3D11Texture2D* pTexture2D = nullptr;
+				HRESULT hr = pResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&pTexture2D);
+				if (SUCCEEDED(hr)) {
+					// 获取纹理描述
+					D3D11_TEXTURE2D_DESC desc;
+					pTexture2D->GetDesc(&desc);
+
+					if (desc.Width == TARGET_TEXTURE_WIDTH && desc.Height == TARGET_TEXTURE_WIDTH && desc.ArraySize == 1 && desc.Format == TARGET_TEXTURE_FORMAT && tempSRVDesc.Format == TARGET_TEXTURE_FORMAT && tempSRVDesc.Texture2D.MipLevels == 1 && tempSRVDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D) {
+						if (targetVertexConstBuffer && targetVertexConstBuffer1p5 && targetVertexConstBuffer1) {
+							ID3D11Buffer* srcbuffers[] = { targetVertexConstBuffer, targetVertexConstBuffer1p5, targetVertexConstBuffer1 };
+							ID3D11Buffer* dstBuffers[] = { targetVertexConstBufferOutPut, targetVertexConstBufferOutPut1p5, targetVertexConstBufferOutPut1 };
+							CopyConstantBuffers(pContext, srcbuffers, dstBuffers, 3);
+						}
+
+						targetIndexCount = IndexCount;
+						targetStartIndexLocation = StartIndexLocation;
+						targetBaseVertexLocation = BaseVertexLocation;
+
+						return oldFuncs.phookD3D11DrawIndexed(pContext, 0, 0, 0);
+					}
+					SAFE_RELEASE(pTexture2D);
+				}
+			}
+			
 		}
+
+		//else if (vertexInfo.size() == 1 &&  (vertexInfo[0].offset == 24576 && vertexInfo[0].stride == 12 && IndexCount == 66 && indexInfo.desc.ByteWidth == 12288 && vertexInfo[0].desc.ByteWidth == 61440))
+		//{
+		//	if (D3D::isEnableRender) {
+		//		SavedState originalState = {};
+		//		SaveState(pContext, originalState);
+		//		D3D::GetSington()->Render();
+		//		RestoreState(pContext, originalState);
+		//	}
+		//}
+
+		return oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
 	}
 
 	void D3D::Render()
@@ -992,10 +1165,6 @@ namespace Hook
 			if (mShaderResourceView.Get())
 				mShaderResourceView.ReleaseAndGetAddressOf();
 
-			UINT backBufferIndex = mSwapChain3->GetCurrentBackBufferIndex();
-			HR(mSwapChain3->GetBuffer(backBufferIndex, IID_PPV_ARGS(&mRealBackBuffer)));
-			HR(g_Device->CreateShaderResourceView(mRealBackBuffer, NULL, mShaderResourceView.GetAddressOf()));
-
 
 			if (isEnableRender && pcam && player)
 			{
@@ -1014,15 +1183,35 @@ namespace Hook
 					return;
 
 
-				g_Context->OMGetRenderTargets(1, &tempRt, &tempSV);
+				g_Context->OMGetRenderTargets(2, tempRt, &tempSV);
+				ID3D11Resource* rtResource = nullptr;
+				if (tempRt[1] != nullptr) {
+					tempRt[1]->GetResource(&rtResource);  // 获取纹理接口
+				}
+				ID3D11Texture2D* rtTexture2D = nullptr;
+				if (rtResource != nullptr) {
+					rtResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&rtTexture2D);
+					rtResource->Release();  // 释放原始资源引用
+				}
 
+				D3D11_TEXTURE2D_DESC originalDesc;
+				rtTexture2D->GetDesc(&originalDesc);  // 获取原纹理参数
+				D3D11_TEXTURE2D_DESC tempDesc = originalDesc;
+				tempDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+				ID3D11Texture2D* tempTexture = nullptr;
+				HR(g_Device->CreateTexture2D(&tempDesc, nullptr, &tempTexture));
+
+				HR(g_Device->CreateShaderResourceView(tempTexture, NULL, mShaderResourceView.GetAddressOf()));
+				g_Context->CopyResource(tempTexture, rtTexture2D);
 
 				UpdateScene(currData);
-				D3DInstance->GrabScreen();
+				D3DInstance->ScreenTextureMod();
 
 				D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
 				
-				g_Context->OMSetRenderTargets(1, &tempRt, tempSV);
+				g_Context->OMSetRenderTargets(2, tempRt, tempSV);
+
 			}
 		}
 	}
@@ -1057,6 +1246,14 @@ namespace Hook
 		bSelfDraw = false;
 		imguiImpl->EnableImGuiRender(isShow, true);
 
+		#ifdef _DEBUG
+		if (GetAsyncKeyState(VK_F4) & 1) {
+			logger::info("Frame capture requested");
+			rdoc_api->TriggerCapture();
+		}
+		#endif  // _DEBUG
+
+		
 		if (isShow) {
 
 			D3DInstance->RenderImGui();
@@ -1090,6 +1287,42 @@ namespace Hook
 	{
 		static D3D instance;	
 		return &instance;
+	}
+
+	void D3D::InitRenderDoc()
+	{
+		HMODULE mod = LoadLibraryA("renderdoc.dll");
+		if (!mod) {
+			logger::error("Failed to load renderdoc.dll. Error code: {}", GetLastError());
+			return;
+		}
+
+		pRENDERDOC_GetAPI RENDERDOC_GetAPI =
+			(pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
+		if (!RENDERDOC_GetAPI) {
+			logger::error("Failed to get RENDERDOC_GetAPI function. Error code: {}", GetLastError());
+			return;
+		}
+
+		int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_6_0, (void**)&rdoc_api);
+		if (ret != 1) {
+			logger::error("RENDERDOC_GetAPI failed with return code: {}", ret);
+			return;
+		}
+
+		int major, minor, patch;
+		rdoc_api->GetAPIVersion(&major, &minor, &patch);
+		logger::info("RenderDoc API v{}.{}.{} loaded", major, minor, patch);
+
+		// Set RenderDoc options
+		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_AllowFullscreen, 1);
+		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_AllowVSync, 1);
+		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_APIValidation, 1);
+		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureAllCmdLists, 1);
+		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureCallstacks, 1);
+		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_RefAllResources, 1);
+
+		logger::info("RenderDoc initialized successfully");
 	}
 
 
@@ -1130,14 +1363,14 @@ namespace Hook
 			RE::ImageSpaceEffectParam* a_param)
 		{
 			// 调用原函数
+			D3DPERF_BeginEvent(0xffffffff, L"TAA");
 			func.get()(This, a_geometry, a_param);
+			D3DPERF_EndEvent();
 			isActive_TAA = (This->IsActive());
 			if (D3D::isEnableRender && This->IsActive()) {
 				D3DInstance->Render();
 			}
 		}
-
-		// 保存原函数地址的 Relocation 实例
 		static inline REL::Relocation<decltype(thunk)*> func;
 	};
 
@@ -1201,6 +1434,21 @@ namespace Hook
 		HookedRender_TAA::func = REL::Relocation<decltype(HookedRender_TAA::thunk)*>(oldFuncTAA);
 
 		logger::info("Install Hook");
+
+#ifdef _DEBUG
+		if (rdoc_api && g_Device.Get()) {
+			IDXGIDevice* pDXGIDevice = nullptr;
+			if (SUCCEEDED(g_Device->QueryInterface(__uuidof(IDXGIDevice), (void**)&pDXGIDevice))) {
+				rdoc_api->SetActiveWindow((void*)pDXGIDevice, g_hWnd);
+				logger::info("Set RenderDoc active window to {:x}", (uintptr_t)g_hWnd);
+				pDXGIDevice->Release();
+			} else {
+				logger::error("Failed to get DXGI device for RenderDoc");
+			}
+		}
+#endif  // _DEBUG
+
+		
 
 		DWORD old_protect;
 		VirtualProtect(oldFuncs.phookD3D11Present, 2, PAGE_EXECUTE_READWRITE, &old_protect);
