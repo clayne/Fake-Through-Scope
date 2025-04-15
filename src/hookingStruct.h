@@ -31,7 +31,7 @@ struct HookInfo
 	
 
 // 顶点数据
-Vertex gdc_Vertices[] = {
+::Vertex gdc_Vertices[] = {
 	{ -1.0f, -1.0f, 0.0f, 0.0f, 0.0f},  // 左下角
 	{ -1.0f, 3.0f, 0.0f, 0.0f, 2.0f},   // 左上角
 	{ 3.0f, -1.0f, 0.0f, 2.0f, 0.0f}    // 右下角

@@ -198,19 +198,6 @@ namespace Hook
 			ID3D11Buffer* const* ppBuffers;
 		};
 
-		struct Vertex
-		{
-			float x, y, z;  // 位置
-			float r, g, b;  // 颜色
-		};
-
-		// 顶点数据
-		const Vertex gdc_Vertices[4] = {
-			{ -1.0f, -1.0f, 0.0f, 0.0f, 0.0f },  // 左下角
-			{ -1.0f, 3.0f, 0.0f, 0.0f, 2.0f },   // 左上角
-			{ 3.0f, -1.0f, 0.0f, 2.0f, 0.0f }    // 右下角
-		};
-
 		void SetupCommonRenderState(
 			ID3D11Resource* sourceTexture, ID3D11VertexShader* vs, ID3D11ClassInstance* const* vsClassInstances, UINT vsClassInstancesCount,
 			ID3D11PixelShader* ps, ID3D11InputLayout* inputLayout, ID3D11BlendState* blendState, const std::vector<VSConstantBufferSlot>& vsCBSlots,
@@ -247,7 +234,6 @@ namespace Hook
 		void SetInterfaceTextRefresh(bool flag);
 		void QueryRender(bool flag) { bQueryRender = flag; }
 		bool GetRenderState() { return bQueryRender ; }
-		void SetIsUpscaler(bool flag) { bIsUpscaler = flag; }
 		void SetIsInGame(bool flag) { bIsInGame = flag; }
 		GameConstBuffer* GetGameConstBuffer() { return &gameConstBuffer; }
 		void SetImGuiImplClass(ImGuiImpl::ImGuiImplClass* imguiImplClass);
@@ -269,11 +255,9 @@ namespace Hook
 		static bool bFinishAimAnim;
 		static int bEnableNVG;
 		static bool bQueryRender;
-		static bool bIsUpscaler;
 		static bool bIsInGame;
 
 	private:
-		RE::TESImageSpaceModifier* BingleTunnelVisionForm;
 		ID3D11Texture2D* m_DstTexture = nullptr;
 		ID3D11ShaderResourceView* m_DstView = nullptr;
 

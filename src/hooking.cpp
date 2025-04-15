@@ -613,7 +613,7 @@ namespace Hook
 		//------------------------------
 		CreateTextureAndViews(
 			g_Device.Get(),
-			windowWidth, windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM,
+			windowHeight, windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM,
 			mRTRenderTargetTexture.GetAddressOf(),
 			mRTRenderTargetView.GetAddressOf(),
 			mRTShaderResourceView.GetAddressOf());
@@ -626,7 +626,7 @@ namespace Hook
 
 		// 创建目标纹理
 		D3D11_TEXTURE2D_DESC texDesc = {};
-		texDesc.Width = windowWidth;
+		texDesc.Width = windowHeight;
 		texDesc.Height = windowHeight;
 		texDesc.MipLevels = 1;
 		texDesc.ArraySize = 1;
@@ -799,7 +799,7 @@ namespace Hook
 		g_Context->VSSetConstantBuffers(1, 1, &targetVertexConstBufferOutPut);
 		g_Context->VSSetConstantBuffers(8, 1, &targetVertexConstBufferOutPut1p5);
 
-		UINT stride = sizeof(Vertex);
+		UINT stride = sizeof(::Vertex);
 		UINT offset = 0;
 
 		// 指定图元类型为三角形列表
@@ -906,7 +906,7 @@ namespace Hook
 				{ 2, 1, &targetVertexConstBufferOutPut1p5 },
 			};
 
-			UINT strides = sizeof(Vertex);
+			UINT strides = sizeof(::Vertex);
 			UINT offsets = 0;
 
 			SetupCommonRenderState(mRealBackBuffer, m_pVertexShader_Legacy.Get(), nullptr, 0, m_pPixelShader_Legacy.Get(), gdc_pVertexLayout, BSTransparent.Get(),
