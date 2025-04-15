@@ -70,27 +70,6 @@ cbuffer ScopeEffectData : register(b5)
 	
 };
 
-cbuffer eyeDirectionData: register(b6)
-{
- 	float3 eyeDirection1;
- 	float MovePercentage1;
- 	float3 eyeDirectionLerp1;
- 	float padding12 = 0;
- 	float3 CurrWeaponPos1;
- 	float padding14 = 0;
- 	float3 CurrRootPos1;
- 	float padding15 = 0;
- 	row_major float4x4 CameraRotation1;
-};
-
-
-cbuffer ftsPoint: register(b7)
-{
-	row_major float4x4 testingMat;
-	row_major float4x4 FtsLocalRotation;
- 	row_major float4x4 FtsWorldRotation;
-	row_major float4x4 CameraRotation2;
-};
 
 SamplerState gSamLinear : register(s0);
 SamplerState gSamReticle : register(s1);

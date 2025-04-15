@@ -455,8 +455,6 @@ void HandleScopeNode()
 	}
 }
 
-
-
 void HookedUpdate()
 {
 	typedef void (*FnUpdate)();
@@ -476,6 +474,8 @@ void HookedUpdate()
 			}
 		}
 
+
+		
 		if (currentData)
 		{
 			if (!bFirstTimeZoomData) {
@@ -529,7 +529,7 @@ void HookedUpdate()
 				gcb.weaponPos = weaponPos;
 				gcb.rootPos = rootPos;
 
-				gcb.camMat = camNode->world.rotate;
+				gcb.camMat = camNode->local.rotate;
 				gcb.ftsLocalMat = scopeNode->local.rotate;
 				gcb.ftsWorldMat = scopeNode->world.rotate;
 				gcb.ftsScreenPos = tempOut;
@@ -672,10 +672,6 @@ public:
 					hasUpdateSighted = true;
 				}
 
-				/*if (hasUpdateSighted && strcmp(evn.animEvent.c_str(), "ReloadEnd") == 0) {
-					hasUpdateSighted = false;
-					hasEjectShellCasing = true;
-				}*/
 				if (hasUpdateSighted && strcmp(evn.tag.c_str(), "initiateStart") == 0) {
 					hasUpdateSighted = false;
 					hasEjectShellCasing = true;
@@ -750,6 +746,7 @@ DWORD WINAPI MainThread(HMODULE hModule)
 
 	
 	hookIns->ImplHookDX11_Init(hModule, BSGraphics::RendererData::GetSingleton()->renderWindow->hwnd);
+
 
 	imgui_Impl = ImGuiImpl::ImGuiImplClass::GetSington();
 	hookIns->SetImGuiImplClass(imgui_Impl);
@@ -892,9 +889,9 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface* a_f4se, F4
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 {
 #ifdef _DEBUG
-	//while (!IsDebuggerPresent()) {
-	//}
-	//Sleep(1000);
+	while (!IsDebuggerPresent()) {
+	}
+	Sleep(1000);
 #endif
 
 	F4SE::Init(a_f4se);

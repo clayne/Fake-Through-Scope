@@ -40,17 +40,12 @@ float4 main(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0) : SV_Target
 	float2 ScopeOffset = ViewDir.xy;
 	ScopeOffset *= rcp(camDepth);
 	ScopeOffset.y *= -AspectRatio;
-	float4 abseyeDirectionLerp = mul(float4(eyeDirectionLerp,1),CameraRotation);
-	if (abseyeDirectionLerp.y < 0 && abseyeDirectionLerp.y >= -0.001)
-		abseyeDirectionLerp.y = -0.001;
-	else if (abseyeDirectionLerp.y >= 0 && abseyeDirectionLerp.y <= 0.001)
-		abseyeDirectionLerp.y = 0.001;
+    float4 abseyeDirectionLerp = mul(float4(eyeDirectionLerp, 1), CameraRotation);
+    if (abseyeDirectionLerp.y < 0 && abseyeDirectionLerp.y >= -0.001)
+        abseyeDirectionLerp.y = -0.001;
+    else if (abseyeDirectionLerp.y >= 0 && abseyeDirectionLerp.y <= 0.001)
+        abseyeDirectionLerp.y = 0.001;
 
-	// float4 abseyeTranslationLerp = mul(CameraRotation,float4(eyeTranslationLerp,1));
-	// if (abseyeTranslationLerp.y < 0 && abseyeTranslationLerp.y >= -0.0025)
-	// 	abseyeTranslationLerp.y = -0.0025;
-	// else if (abseyeTranslationLerp.y >= 0 && abseyeTranslationLerp.y <= 0.0025)
-	// 	abseyeTranslationLerp.y = 0.0025;
 	
 	float2 eye_velocity = clampMagnitude(abseyeDirectionLerp.xy , 2);
 

@@ -518,8 +518,6 @@ namespace Hook
 		// 常量缓冲区
 		CreateConstantBuffer(g_Device.Get(), m_pScopeEffectBuffer.GetAddressOf(), sizeof(ScopeEffectShaderData));
 		CreateConstantBuffer(g_Device.Get(), m_pConstantBufferData.GetAddressOf(), sizeof(ConstBufferData));
-		CreateConstantBuffer(g_Device.Get(), m_VSBuffer.GetAddressOf(), sizeof(VSConstantData));
-		CreateConstantBuffer(g_Device.Get(), m_VSOutBuffer.GetAddressOf(), sizeof(VSOutConstantData));
 
 		// 动态常量缓冲区（示例）
 		D3D11_BUFFER_DESC outputDesc = {};
@@ -648,7 +646,7 @@ namespace Hook
 
 	void D3D::LoadAimTexture(const std::string& path)
 	{
-		if (!path.empty())
+		if (path.empty())
 			return;
 
 		const wchar_t* tempPath = GetWC(path.c_str());
@@ -694,17 +692,6 @@ namespace Hook
 		dst.FTS_ScreenPos = { src.ftsScreenPos.x, src.ftsScreenPos.y };
 	}
 
-	void D3D::UpdateVsConstants(const GameConstBuffer& src, VSConstantData& dst)
-	{
-		using namespace detail;
-
-		CopyVector3(dst.CurrRootPos, src.rootPos);
-		CopyVector3(dst.CurrWeaponPos, src.weaponPos);
-		CopyVector3(dst.eyeDirection, src.virDir);
-		CopyVector3(dst.eyeDirectionLerp, src.VirDirLerp);
-
-		memcpy_s(&vsConstanData.CameraRotation, sizeof(float[16]), &src.camMat.entry[0], sizeof(float[9]));
-	}
 
 	void D3D::UpdateScene(FTSData* currData)
 	{
@@ -721,8 +708,6 @@ namespace Hook
 		}
 
 		UpdateGameConstants(gameConstBuffer, scopeData);
-
-		vsConstanData.MovePercentage1 = currData->shaderData.movePercentage;
 		scopeData.targetAdjustFov = pcam->fovAdjustCurrent;
 
 		if (bResetZoomDelta) {
@@ -769,16 +754,11 @@ namespace Hook
 			scopeData.parallax_relativeFogRadius = parallax.relativeFogRadius;
 			scopeData.parallax_scopeSwayAmount = parallax.scopeSwayAmount;
 			scopeData.baseFovAdjustTarget = shaderData.fovAdjust;
-
-			// VS常量数据
-			vsConstanData.MovePercentage1 = shaderData.movePercentage;
-			UpdateVsConstants(gameConstBuffer, vsConstanData);
 		}
 #pragma endregion
 
 		// 区域5: 统一更新常量缓冲区
 		UpdateConstantBuffer(m_pScopeEffectBuffer, scopeData);
-		UpdateConstantBuffer(m_VSBuffer, vsConstanData);
 
 		// 特殊常量缓冲区
 		constBufferData.width = windowWidth;
@@ -1521,7 +1501,6 @@ namespace Hook
 	int D3D::bEnableNVG = 0;
 	bool D3D::bQueryRender = false;
 	bool D3D::isShow = false;
-	bool D3D::bIsUpscaler = false;
 	bool D3D::bIsInGame = false;
 	bool D3D::isEnableScopeEffect = false;
 	bool D3D::bEnableEditMode = false;

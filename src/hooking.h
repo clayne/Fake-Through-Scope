@@ -63,28 +63,6 @@ namespace Hook
 			float height;
 		};
 
-		__declspec(align(16)) struct VSConstantData
-		{
-			XMFLOAT3 eyeDirection = {0,0,0};
-			float MovePercentage1 = 0;
-			XMFLOAT3 eyeDirectionLerp = { 0, 0, 0 };
-			float padding12 = 0;
-			XMFLOAT3 CurrWeaponPos = { 0, 0, 0 };
-			float padding14 = 0;
-			XMFLOAT3 CurrRootPos = { 0, 0, 0 };
-			float padding15 = 0;
-			XMFLOAT4X4 CameraRotation = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-
-		};
-
-		__declspec(align(16)) struct VSOutConstantData
-		{
-			XMFLOAT4X4 testingMat = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-			XMFLOAT4X4 ftsLocalRotation = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-			XMFLOAT4X4 ftsWorldRotation = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-			XMFLOAT4X4 CameraRotation = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-		};
-
 	public:
 
 		struct ScopeEffectShaderData
@@ -213,7 +191,6 @@ namespace Hook
 		template <typename T>
 		void UpdateConstantBuffer(const ComPtr<ID3D11Buffer>& buffer, const T& data);
 		void UpdateGameConstants(const GameConstBuffer& src, ScopeEffectShaderData& dst);
-		void UpdateVsConstants(const GameConstBuffer& src, VSConstantData& dst);
 
 		struct OldFuncs
 		{
@@ -300,7 +277,6 @@ namespace Hook
 		ScopeEffectShaderData scopeData;
 		GameConstBuffer gameConstBuffer;
 		ConstBufferData constBufferData;
-		VSConstantData vsConstanData;
 		
 		ComPtr<ID3D11Texture2D> mRTRenderTargetTexture;
 		ComPtr<ID3D11RenderTargetView> mRTRenderTargetView;
