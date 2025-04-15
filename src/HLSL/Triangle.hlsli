@@ -92,13 +92,6 @@ cbuffer ftsPoint: register(b7)
 	row_major float4x4 CameraRotation2;
 };
 
-cbuffer CopyFormGame : register(b8)
-{
-	float4 unkbuf1;
-	float4x4 ProjectMat;
-}
-
-
 SamplerState gSamLinear : register(s0);
 SamplerState gSamReticle : register(s1);
 Texture2D tBACKBUFFER : register(t4);
@@ -119,27 +112,11 @@ float2 aspect_ratio_correction(float2 tc)
 	return tc;
 }
 
-float3 ViewToScreen(float4 obj)
-{
-	float4 clipPos = mul(obj,projMat);
-	float4 ndcPosition = clipPos / obj.w;
-	float3 screenPos; 	
-
-	screenPos.x = (ndcPosition.x + 1.0f) / 2.0f * BUFFER_WIDTH;
-	screenPos.y = (1.0f - ndcPosition.y) / 2.0f * BUFFER_HEIGHT;
-	screenPos.z = ndcPosition.z;
-	                 
-	return screenPos;
-}
-
 float2 clampMagnitude(float2 v, float l)
 {
 	return normalize(v) * min(length(v), l);
 }
 
-/// <summary>
-/// From CrookR and I modified a bit
-/// </summary>
 float getparallax(float d, float2 ds, float dfov)
 {
 	return clamp(1 - pow(abs(rcp(parallax_Radius * ds.y) * (parallax_relativeFogRadius * d * ds.y)), parallax_scopeSwayAmount), 0, parallax_maxTravel);
@@ -159,31 +136,4 @@ float4 NVGEffect(float4 color, float2 texcoord)
 	intensity = 1.0f - larger * OffIntensity;
 
 	return float4(saturate(nvColor.xyz * intensity * nvIntensity), 1);
-}
-
-float GetLengthDiff(float length)
-{
-	return (length * tan(radians(GameFov/2))) / tan(radians(90/2)) ;
-}
-
-float2 GetCoordDiff(float2 coord)
-{
-	return float2(GetLengthDiff(coord.x), GetLengthDiff(coord.y));
-}
-
-float3 GetCoordDiff(float3 coord)
-{
-	return float3(GetLengthDiff(coord.x), GetLengthDiff(coord.y),GetLengthDiff(coord.z));
-}
-
-//useless
-float2 GetTexOffsetDiff(float2 offset_t)
-{
-	float2 offset_s = offset_t * 2 - 1;
-	float aspect = BUFFER_WIDTH / BUFFER_HEIGHT;
-	float FOV1_y = 2 * atan(tan(radians(GameFov/2)) / aspect);
-	float FOV2_y = 2 * atan(tan(radians(90/2)) / aspect);
-	float2 offset2_s = (offset_s * tan(radians(FOV2_y/2))) / tan(radians(FOV1_y/2));
-	float2 offset2_t = (offset2_s + 1) / 2;
-	return offset2_t;
 }

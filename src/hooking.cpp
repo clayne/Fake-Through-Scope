@@ -54,8 +54,9 @@ bool EnableDebugPrivilege()
 }
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#ifdef _DEBUG
 RENDERDOC_API_1_6_0* rdoc_api = nullptr;
-
+#endif
 static constexpr UINT TARGET_STRIDE = 20;
 static constexpr UINT TARGET_INDEX_COUNT = 24;
 static constexpr UINT TARGET_BUFFER_SIZE = 0x0000000008000000;
@@ -149,6 +150,7 @@ ComPtr<ID3D11Buffer> plane_pIndexBuffer = nullptr;
 ID3D11Buffer* gdc_pVertexBuffer = NULL;
 ID3D11InputLayout* gdc_pVertexLayout = NULL;
 ID3D11Buffer* gdc_pIndexBuffer = NULL;
+HMODULE dlssMod;
 
 using namespace ScopeData;
 
@@ -476,8 +478,6 @@ namespace Hook
 		rtDesc.BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		rtDesc.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 		HR(g_Device->CreateBlendState(&blendDesc, BSTransparent.GetAddressOf()));
-		// 创建两个相同的混合状态（如果确实需要两个，否则保留一个）
-		//HR(g_Device->CreateBlendState(&blendDesc, &mTransparentBS));  // 如果确实需要第三个
 	}
 
 	void CreateConstantBuffer(ID3D11Device* device, ID3D11Buffer** buffer, UINT byteWidth)
@@ -854,9 +854,9 @@ namespace Hook
 		HR(g_Device->CreateDepthStencilState(&tempDSD, depthStencilState.GetAddressOf()));
 
 		// === 2. 核心渲染状态设置 ===
-		ID3D11RenderTargetView* rtvs[1] = { tempRt[1] };
+		ID3D11RenderTargetView* rtvs[1] = {};
+		rtvs[0] = dlssMod ? tempRt[0] : tempRt[1];
 		g_Context->OMSetRenderTargets(1, rtvs, tempSV);
-
 		// 复制资源（关键修复点）
 		if (sourceTexture && m_DstTexture) {
 			g_Context->CopyResource(m_DstTexture, sourceTexture);
@@ -1185,8 +1185,17 @@ namespace Hook
 
 				g_Context->OMGetRenderTargets(2, tempRt, &tempSV);
 				ID3D11Resource* rtResource = nullptr;
-				if (tempRt[1] != nullptr) {
-					tempRt[1]->GetResource(&rtResource);  // 获取纹理接口
+				if (dlssMod)
+				{
+					if (tempRt[0] != nullptr) {
+						tempRt[0]->GetResource(&rtResource);  // 获取纹理接口
+					}
+				}
+				else
+				{
+					if (tempRt[1] != nullptr) {
+						tempRt[1]->GetResource(&rtResource);  // 获取纹理接口
+					}
 				}
 				ID3D11Texture2D* rtTexture2D = nullptr;
 				if (rtResource != nullptr) {
@@ -1208,10 +1217,15 @@ namespace Hook
 				UpdateScene(currData);
 				D3DInstance->ScreenTextureMod();
 
-				D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
+				if (bLegacyMode)
+					D3DInstance->RenderToReticleTexture();
+				else
+					D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
 				
 				g_Context->OMSetRenderTargets(2, tempRt, tempSV);
 
+				SAFE_RELEASE(tempTexture);
+				SAFE_RELEASE(rtTexture2D);
 			}
 		}
 	}
@@ -1253,6 +1267,9 @@ namespace Hook
 		}
 		#endif  // _DEBUG
 
+		if (D3D::isEnableRender && dlssMod) {
+			D3DInstance->Render();
+		}
 		
 		if (isShow) {
 
@@ -1325,8 +1342,7 @@ namespace Hook
 		logger::info("RenderDoc initialized successfully");
 	}
 
-
-	bool CreateAndEnableHook(void* target, void* hook, void** original, const char* hookName)
+	bool D3D::CreateAndEnableHook(void* target, void* hook, void** original, const char* hookName)
 	{
 		if (MH_CreateHook(target, hook, original) != MH_OK) {
 			logger::error("Failed to create %s hook", hookName);
@@ -1338,7 +1354,6 @@ namespace Hook
 		}
 		return true;
 	}
-
 
 	void D3D::InitializeImGui(IDXGISwapChain* swapChain, ID3D11Device* device, ID3D11DeviceContext* context)
 	{
@@ -1368,7 +1383,8 @@ namespace Hook
 			D3DPERF_EndEvent();
 			isActive_TAA = (This->IsActive());
 			if (D3D::isEnableRender && This->IsActive()) {
-				D3DInstance->Render();
+				if (!dlssMod)
+					D3DInstance->Render();
 			}
 		}
 		static inline REL::Relocation<decltype(thunk)*> func;
@@ -1377,6 +1393,14 @@ namespace Hook
 
 	DWORD __stdcall D3D::HookDX11_Init()
 	{
+		try
+		{
+			dlssMod = LoadLibraryA("Data/F4SE/Plugins/Fallout4Upscaler.dll");
+		}
+		catch (...){
+			logger::error("Failed to load Fallout4Upscaler.dll. Error code: {}", GetLastError());
+		}
+
 		logger::info("HookDX11_Init");
 
 		const auto rendererData = RE::BSGraphics::RendererData::GetSingleton();

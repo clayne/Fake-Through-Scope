@@ -186,6 +186,7 @@ namespace Hook
 		static BOOL __stdcall ClipCursorHook(RECT*);
 		static HRESULT __stdcall PresentHook(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
 		static void __stdcall DrawIndexedHook(ID3D11DeviceContext* pContext, UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation);
+		static bool CreateAndEnableHook(void* target, void* hook, void** original, const char* hookName);
 
 		DWORD __stdcall HookDX11_Init();
 		void InitializeImGui(IDXGISwapChain* swapChain, ID3D11Device* device, ID3D11DeviceContext* context);

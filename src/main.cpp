@@ -450,7 +450,7 @@ void HandleScopeNode()
 					SetNodeVisibility(scopeNormalNode_i, scopeAimingNode_i, true);
 			} 
 			else 
-				SetNodeVisibility(scopeNormalNode_i, scopeAimingNode_i, false);
+				SetNodeVisibility(scopeNormalNode_i, scopeAimingNode_i, true);
 		}
 	}
 }
@@ -892,9 +892,9 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface* a_f4se, F4
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se)
 {
 #ifdef _DEBUG
-	while (!IsDebuggerPresent()) {
-	}
-	Sleep(1000);
+	//while (!IsDebuggerPresent()) {
+	//}
+	//Sleep(1000);
 #endif
 
 	F4SE::Init(a_f4se);
