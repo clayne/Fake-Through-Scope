@@ -116,7 +116,7 @@ add_library(
 macro(set_hlsl_properties HLSL_FILE SHADER_TYPE)
   set_source_files_properties(${HLSL_FILE} 
   PROPERTIES VS_SHADER_OBJECT_FILE_NAME 
-  "${Fallout4Path}/Data/Shaders/XiFeiLi/%(Filename).cso" 
+  "G:/Games/FO4_SO/mods/Fake Through Scope testing fts/Shaders/XiFeiLi/%(Filename).cso" 
   VS_SHADER_TYPE ${SHADER_TYPE} VS_SHADER_MODEL 5.0 VS_SHADER_ENTRYPOINT main)
 endmacro()
 

@@ -332,29 +332,7 @@ NiPoint3 CrossProduct(NiPoint3 a, NiPoint3 b)
 	return ret;
 }
 
-float DotProduct(NiPoint3 a, NiPoint3 b)
-{
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-float Length(NiPoint3 p)
-{
-	return sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-}
-
-NiPoint3 Normalize(NiPoint3 p)
-{
-	NiPoint3 ret = p;
-	float l = Length(p);
-	if (l == 0) {
-		ret.x = 1;
-		ret.y = 0;
-		ret.z = 0;
-	} else {
-		ret.x /= l;
-		ret.y /= l;
-		ret.z /= l;
-	}
-	return ret;
-}
+float DotProduct(NiPoint3 a, NiPoint3 b);
+float Length(NiPoint3 p);
+NiPoint3 Normalize(NiPoint3 p);
 

@@ -1102,16 +1102,6 @@ namespace Hook
 			
 		}
 
-		//else if (vertexInfo.size() == 1 &&  (vertexInfo[0].offset == 24576 && vertexInfo[0].stride == 12 && IndexCount == 66 && indexInfo.desc.ByteWidth == 12288 && vertexInfo[0].desc.ByteWidth == 61440))
-		//{
-		//	if (D3D::isEnableRender) {
-		//		SavedState originalState = {};
-		//		SaveState(pContext, originalState);
-		//		D3D::GetSington()->Render();
-		//		RestoreState(pContext, originalState);
-		//	}
-		//}
-
 		return oldFuncs.phookD3D11DrawIndexed(pContext, IndexCount, StartIndexLocation, BaseVertexLocation);
 	}
 
@@ -1154,7 +1144,7 @@ namespace Hook
 					InitEffect();
 					InitLegacyEffect();
 					InitResource();
-					bIsFirst = false;
+					
 				}
 
 				auto currData = sdh->GetCurrentFTSData();
@@ -1162,38 +1152,34 @@ namespace Hook
 				if (!currData || !currData->containAlladditionalKeywords)
 					return;
 
+				mCurRTTexture.Reset();
+				rtTexture2D.Reset();
 
 				g_Context->OMGetRenderTargets(2, tempRt, &tempSV);
 				ID3D11Resource* rtResource = nullptr;
-				if (dlssMod)
-				{
+				if (dlssMod) {
 					if (tempRt[0] != nullptr) {
 						tempRt[0]->GetResource(&rtResource);  // 获取纹理接口
 					}
-				}
-				else
-				{
+				} else {
 					if (tempRt[1] != nullptr) {
 						tempRt[1]->GetResource(&rtResource);  // 获取纹理接口
 					}
 				}
-				ID3D11Texture2D* rtTexture2D = nullptr;
 				if (rtResource != nullptr) {
-					rtResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&rtTexture2D);
+					rtResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)rtTexture2D.GetAddressOf());
 					rtResource->Release();  // 释放原始资源引用
 				}
-
 				D3D11_TEXTURE2D_DESC originalDesc;
 				rtTexture2D->GetDesc(&originalDesc);  // 获取原纹理参数
-				D3D11_TEXTURE2D_DESC tempDesc = originalDesc;
-				tempDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+				rtTextureDesc = originalDesc;
+				rtTextureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+				HR(g_Device->CreateTexture2D(&rtTextureDesc, nullptr, mCurRTTexture.GetAddressOf()));
+				HR(g_Device->CreateShaderResourceView(mCurRTTexture.Get(), NULL, mShaderResourceView.GetAddressOf()));
+				
 
-				ID3D11Texture2D* tempTexture = nullptr;
-				HR(g_Device->CreateTexture2D(&tempDesc, nullptr, &tempTexture));
-
-				HR(g_Device->CreateShaderResourceView(tempTexture, NULL, mShaderResourceView.GetAddressOf()));
-				g_Context->CopyResource(tempTexture, rtTexture2D);
-
+				bIsFirst = false;
+				g_Context->CopyResource(mCurRTTexture.Get(), rtTexture2D.Get());
 				UpdateScene(currData);
 				D3DInstance->ScreenTextureMod();
 
@@ -1203,9 +1189,6 @@ namespace Hook
 					D3DInstance->RenderToReticleTextureNew(targetIndexCount, targetStartIndexLocation, targetBaseVertexLocation);
 				
 				g_Context->OMSetRenderTargets(2, tempRt, tempSV);
-
-				SAFE_RELEASE(tempTexture);
-				SAFE_RELEASE(rtTexture2D);
 			}
 		}
 	}
@@ -1288,6 +1271,7 @@ namespace Hook
 
 	void D3D::InitRenderDoc()
 	{
+#ifdef _DEBUG
 		HMODULE mod = LoadLibraryA("renderdoc.dll");
 		if (!mod) {
 			logger::error("Failed to load renderdoc.dll. Error code: {}", GetLastError());
@@ -1306,11 +1290,9 @@ namespace Hook
 			logger::error("RENDERDOC_GetAPI failed with return code: {}", ret);
 			return;
 		}
-
 		int major, minor, patch;
 		rdoc_api->GetAPIVersion(&major, &minor, &patch);
 		logger::info("RenderDoc API v{}.{}.{} loaded", major, minor, patch);
-
 		// Set RenderDoc options
 		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_AllowFullscreen, 1);
 		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_AllowVSync, 1);
@@ -1320,6 +1302,7 @@ namespace Hook
 		rdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_RefAllResources, 1);
 
 		logger::info("RenderDoc initialized successfully");
+#endif
 	}
 
 	bool D3D::CreateAndEnableHook(void* target, void* hook, void** original, const char* hookName)

@@ -282,5 +282,8 @@ namespace Hook
 		ComPtr<ID3D11RenderTargetView> mRTRenderTargetView;
 		ComPtr<ID3D11ShaderResourceView> mRTShaderResourceView;
 
+		ComPtr<ID3D11Texture2D> mCurRTTexture;
+		ComPtr<ID3D11Texture2D> rtTexture2D;
+		D3D11_TEXTURE2D_DESC rtTextureDesc;
 	};
 }

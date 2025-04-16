@@ -12,11 +12,10 @@ float4 main(float4 vpos : SV_Position, float2 texcoord : TEXCOORD0) : SV_Target
     else if (abseyeDirectionLerp.y >= 0 && abseyeDirectionLerp.y <= 0.001)
         abseyeDirectionLerp.y = 0.001;
 
-    float2 eye_velocity = clampMagnitude(abseyeDirectionLerp.xy , 2);
+    float2 eye_velocity = clampMagnitude(abseyeDirectionLerp.xy , 1.5f);
 
     float2 FTS_ScreenPosInPixel = FTS_ScreenPos;
 
-	//float2 adjTex = aspect_ratio_correction(texcoord);
     float2 aspectCorrectTex = aspect_ratio_correction(texcoord);
     float2 adjTex = texcoord;
     static const float Xoffset = (0.5 - BUFFER_HEIGHT * rcp(BUFFER_WIDTH) * 0.5);

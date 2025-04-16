@@ -1,7 +1,6 @@
 #include "FTSData.h"
 #include "ImGuiImpl.h"
 #include <hooking.h>
-
 using namespace RE;
 using namespace BSScript;
 using namespace std;
@@ -414,7 +413,6 @@ bool IsNeedToBeCull(int indexCount = 0, int StrideCount = 0)
 	return true;
 }
 
-
 void SetNodeVisibility(NiNode* normal, NiNode* aiming, bool isScopeActive)
 {
 	if (normal && aiming) {
@@ -474,8 +472,6 @@ void HookedUpdate()
 			}
 		}
 
-
-		
 		if (currentData)
 		{
 			if (!bFirstTimeZoomData) {
@@ -491,7 +487,6 @@ void HookedUpdate()
 
 			scopeNode = player->Get3D(true)->GetObjectByName("FTS:CenterPoint");
 			camNode = player->Get3D(true)->GetObjectByName("Camera");
-
 			pc = PlayerControls::GetSingleton();
 			NiPoint3 tempOut;
 
@@ -569,7 +564,7 @@ void HookedUpdate()
 								weaponInstanceData->zoomData->zoomData.cameraOffset = { tempZDO.x, tempZDO.y, tempZDO.z };
 							}
 						}
-
+						
 						hookIns->EnableRender(true);
 						hookIns->QueryRender(true);
 					}
@@ -776,7 +771,7 @@ void InitializePlugin()
 
 	pcam = PlayerCamera::GetSingleton();
 	((InputEventReceiverOverride*)((uint64_t)pcam + 0x38))->HookSink();
-	
+
 	an_45 = (RE::BGSKeyword*)RE::TESForm::GetFormByEditorID("an_45d");
 	AnimsXM2010_scopeKH45 = (RE::BGSKeyword*)RE::TESForm::GetFormByEditorID("AnimsXM2010_scopeKH45");
 	AX50_toounScope_K = (RE::BGSKeyword*)RE::TESForm::GetFormByEditorID("AX50_toounScope_K");
@@ -802,6 +797,8 @@ void InitializePlugin()
 	hookIns->QueryChangeReticleTexture();
 	sdh->ReadCustomScopeDataFiles(customPath);
 	sdh->ReadDefaultScopeDataFile();
+
+	player->Get3D(true)->world;
 	
 }
 
